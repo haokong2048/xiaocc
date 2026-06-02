@@ -1,9 +1,14 @@
+#include <assert.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+//
+// 词法分析器
+//
 
 typedef enum {
     TK_PUNCT, // 标点符号
@@ -107,7 +112,7 @@ static Token *tokenize(void) {
         }
 
         // 标点符号
-        if (*p == '+' || *p == '-') {
+        if (ispunct(*p)) {
             cur = cur->next = new_token(TK_PUNCT, p, p + 1);
             p++;
             continue;
@@ -120,33 +125,171 @@ static Token *tokenize(void) {
     return head.next;
 }
 
+//
+// 语法分析器
+//
+
+typedef enum {
+    ND_ADD, // +
+    ND_SUB, // -
+    ND_MUL, // *
+    ND_DIV, // /
+    ND_NUM, // 整数
+} NodeKind;
+
+// AST 节点类型
+typedef struct Node Node;
+struct Node {
+    NodeKind kind; // 节点类型
+    Node *lhs;     // 左操作数
+    Node *rhs;     // 右操作数
+    int val;       // 如果类型是 ND_NUM，存储其值
+};
+
+static Node *new_node(NodeKind kind) {
+    Node *node = calloc(1, sizeof(Node));
+    node->kind = kind;
+    return node;
+}
+
+static Node *new_binary(NodeKind kind, Node *lhs, Node *rhs) {
+    Node *node = new_node(kind);
+    node->lhs = lhs;
+    node->rhs = rhs;
+    return node;
+}
+
+static Node *new_num(int val) {
+    Node *node = new_node(ND_NUM);
+    node->val = val;
+    return node;
+}
+
+static Node *expr(Token **rest, Token *tok);
+static Node *mul(Token **rest, Token *tok);
+static Node *primary(Token **rest, Token *tok);
+
+// expr = mul ("+" mul | "-" mul)*
+static Node *expr(Token **rest, Token *tok) {
+    Node *node = mul(&tok, tok);
+
+    for (;;) {
+        if (equal(tok, "+")) {
+            node = new_binary(ND_ADD, node, mul(&tok, tok->next));
+            continue;
+        }
+
+        if (equal(tok, "-")) {
+            node = new_binary(ND_SUB, node, mul(&tok, tok->next));
+            continue;
+        }
+
+        *rest = tok;
+        return node;
+    }
+}
+
+// mul = primary ("*" primary | "/" primary)*
+static Node *mul(Token **rest, Token *tok) {
+    Node *node = primary(&tok, tok);
+
+    for (;;) {
+        if (equal(tok, "*")) {
+            node = new_binary(ND_MUL, node, primary(&tok, tok->next));
+            continue;
+        }
+
+        if (equal(tok, "/")) {
+            node = new_binary(ND_DIV, node, primary(&tok, tok->next));
+            continue;
+        }
+
+        *rest = tok;
+        return node;
+    }
+}
+
+// primary = "(" expr ")" | num
+static Node *primary(Token **rest, Token *tok) {
+    if (equal(tok, "(")) {
+        Node *node = expr(&tok, tok->next);
+        *rest = skip(tok, ")");
+        return node;
+    }
+
+    if (tok->kind == TK_NUM) {
+        Node *node = new_num(tok->val);
+        *rest = tok->next;
+        return node;
+    }
+
+    error_tok(tok, "expected an expression");
+}
+
+//
+// 代码生成器
+//
+
+static int depth;
+
+static void push(void) {
+    printf("    str x0, [sp, #-16]!\n");
+    depth++;
+}
+
+static void pop(char *arg) {
+    printf("    ldr %s, [sp], #16\n", arg);
+    depth--;
+}
+
+static void gen_expr(Node *node) {
+    if (node->kind == ND_NUM) {
+        printf("    mov x0, #%d\n", node->val);
+        return;
+    }
+
+    gen_expr(node->rhs);
+    push();
+    gen_expr(node->lhs);
+    pop("x1");
+
+    switch (node->kind) {
+    case ND_ADD:
+        printf("    add x0, x0, x1\n");
+        return;
+    case ND_SUB:
+        printf("    sub x0, x0, x1\n");
+        return;
+    case ND_MUL:
+        printf("    mul x0, x0, x1\n");
+        return;
+    case ND_DIV:
+        printf("    sdiv x0, x0, x1\n");
+        return;
+    }
+
+    error("invalid expression");
+}
+
 int main(int argc, char **argv) {
     if (argc != 2)
         error("%s: invalid number of arguments", argv[0]);
 
+    // 词法分析和语法分析
     current_input = argv[1];
     Token *tok = tokenize();
+    Node *node = expr(&tok, tok);
+
+    if (tok->kind != TK_EOF)
+        error_tok(tok, "extra token");
 
     printf("    .global main\n");
     printf("main:\n");
 
-    // 第一个 Token 必须是数字
-    printf("    mov x0, #%d\n", get_number(tok));
-    tok = tok->next;
-
-    // 后续为 '+ <数字>' 或 '- <数字>' 的重复
-    while (tok->kind != TK_EOF) {
-        if (equal(tok, "+")) {
-            printf("    add x0, x0, #%d\n", get_number(tok->next));
-            tok = tok->next->next;
-            continue;
-        }
-
-        tok = skip(tok, "-");
-        printf("    sub x0, x0, #%d\n", get_number(tok));
-        tok = tok->next;
-    }
-
+    // 遍历 AST 生成汇编
+    gen_expr(node);
     printf("    ret\n");
+
+    assert(depth == 0);
     return 0;
 }
