@@ -3,9 +3,13 @@ CC=$(CROSS_COMPILE)gcc
 
 CFLAGS=-std=c11 -g -fno-common
 LDFLAGS=-static
+SRCS=$(wildcard *.c)
+OBJS=$(SRCS:.c=.o)
 
-xiaocc: main.o
-	$(CC) -o xiaocc main.o $(LDFLAGS)
+xiaocc: $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(OBJS): xiaocc.h
 
 test: xiaocc
 	./test.sh
