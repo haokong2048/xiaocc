@@ -30,7 +30,7 @@ static void gen_addr(Node *node) {
         return;
     }
 
-    error("not an lvalue");
+    error_tok(node->tok, "not an lvalue");
 }
 
 // 为给定节点生成代码
@@ -92,7 +92,7 @@ static void gen_expr(Node *node) {
         return;
     }
 
-    error("invalid expression");
+    error_tok(node->tok, "invalid expression");
 }
 
 static void gen_stmt(Node *node) {
@@ -140,7 +140,7 @@ static void gen_stmt(Node *node) {
         return;
     }
 
-    error("invalid statement");
+    error_tok(node->tok, "invalid statement");
 }
 
 // 为局部变量分配偏移量
