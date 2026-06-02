@@ -79,6 +79,12 @@ static int read_punct(char *p) {
     return ispunct(*p) ? 1 : 0;
 }
 
+static void convert_keywords(Token *tok) {
+    for (Token *t = tok; t->kind != TK_EOF; t = t->next)
+        if (equal(t, "return"))
+            t->kind = TK_KEYWORD;
+}
+
 // 对输入字符串进行词法分析，返回 Token 链表
 Token *tokenize(char *p) {
     current_input = p;
@@ -101,7 +107,7 @@ Token *tokenize(char *p) {
             continue;
         }
 
-        // 标识符
+        // 标识符或关键字
         if (is_ident1(*p)) {
             char *start = p;
             do {
@@ -123,5 +129,6 @@ Token *tokenize(char *p) {
     }
 
     cur = cur->next = new_token(TK_EOF, p, p);
+    convert_keywords(head.next);
     return head.next;
 }
