@@ -12,6 +12,19 @@ static void pop(char *arg) {
     depth--;
 }
 
+// 计算给定节点的绝对地址
+// 如果节点不在内存中则报错
+static void gen_addr(Node *node) {
+    if (node->kind == ND_VAR) {
+        int offset = (node->name - 'a' + 1) * 8;
+        printf("    sub x0, x29, #%d\n", offset);
+        return;
+    }
+
+    error("not an lvalue");
+}
+
+// 为给定节点生成代码
 static void gen_expr(Node *node) {
     switch (node->kind) {
     case ND_NUM:
@@ -20,6 +33,17 @@ static void gen_expr(Node *node) {
     case ND_NEG:
         gen_expr(node->lhs);
         printf("    neg x0, x0\n");
+        return;
+    case ND_VAR:
+        gen_addr(node);
+        printf("    ldr x0, [x0]\n");
+        return;
+    case ND_ASSIGN:
+        gen_addr(node->lhs);
+        push();
+        gen_expr(node->rhs);
+        pop("x1");
+        printf("    str x0, [x1]\n");
         return;
     }
 
@@ -75,10 +99,18 @@ void codegen(Node *node) {
     printf("    .global main\n");
     printf("main:\n");
 
+    // 函数序言
+    printf("    stp x29, x30, [sp, #-16]!\n");
+    printf("    mov x29, sp\n");
+    printf("    sub sp, sp, #208\n");
+
     for (Node *n = node; n; n = n->next) {
         gen_stmt(n);
         assert(depth == 0);
     }
 
+    // 函数尾声
+    printf("    add sp, sp, #208\n");
+    printf("    ldp x29, x30, [sp], #16\n");
     printf("    ret\n");
 }

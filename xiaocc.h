@@ -14,6 +14,7 @@
 //
 
 typedef enum {
+    TK_IDENT, // 标识符
     TK_PUNCT, // 标点符号
     TK_NUM,   // 数字字面量
     TK_EOF,   // 文件结束标记
@@ -50,7 +51,9 @@ typedef enum {
     ND_NE,        // !=
     ND_LT,        // <
     ND_LE,        // <=
+    ND_ASSIGN,    // =
     ND_EXPR_STMT, // 表达式语句
+    ND_VAR,       // 变量
     ND_NUM,       // 整数
 } NodeKind;
 
@@ -61,6 +64,7 @@ struct Node {
     Node *next;    // 下一个节点
     Node *lhs;     // 左操作数
     Node *rhs;     // 右操作数
+    char name;     // 如果类型是 ND_VAR，存储变量名
     int val;       // 如果类型是 ND_NUM，存储其值
 };
 
