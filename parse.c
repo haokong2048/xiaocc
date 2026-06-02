@@ -1,3 +1,20 @@
+// 该文件包含一个 C 语言递归下降解析器。
+//
+// 该文件中的大多数函数名称表示它们应该从
+// 输入 token 列表中解析的语法符号。例如，stmt()
+// 负责从 token 列表中读取语句，然后构建一个
+// 表示该语句的 AST 节点。
+//
+// 每个函数概念上返回两个值：一个 AST 节点和
+// 输入 token 的剩余部分。由于 C 语言不支持
+// 多返回值，剩余 token 通过指针参数返回给
+// 调用者。
+//
+// 输入 token 通过链表表示。与许多递归下降
+// 解析器不同，我们没有"输入 token 流"的概念。
+// 大多数解析函数不改变解析器的全局状态。
+// 因此在这个解析器中很容易向前看任意数量的 token。
+
 #include "xiaocc.h"
 
 // 解析过程中创建的所有局部变量实例
@@ -263,7 +280,7 @@ static Node *mul(Token **rest, Token *tok) {
     }
 }
 
-// unary = ("+" | "-") unary
+// unary = ("+" | "-" | "*" | "&") unary
 //       | primary
 static Node *unary(Token **rest, Token *tok) {
     if (equal(tok, "+"))
@@ -271,6 +288,12 @@ static Node *unary(Token **rest, Token *tok) {
 
     if (equal(tok, "-"))
         return new_unary(ND_NEG, unary(rest, tok->next), tok);
+
+    if (equal(tok, "&"))
+        return new_unary(ND_ADDR, unary(rest, tok->next), tok);
+
+    if (equal(tok, "*"))
+        return new_unary(ND_DEREF, unary(rest, tok->next), tok);
 
     return primary(rest, tok);
 }

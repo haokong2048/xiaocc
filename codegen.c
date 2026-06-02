@@ -2,6 +2,8 @@
 
 static int depth;
 
+static void gen_expr(Node *node);
+
 static int count(void) {
     static int i = 1;
     return i++;
@@ -25,8 +27,12 @@ static int align_to(int n, int align) {
 // 计算给定节点的绝对地址
 // 如果节点不在内存中则报错
 static void gen_addr(Node *node) {
-    if (node->kind == ND_VAR) {
+    switch (node->kind) {
+    case ND_VAR:
         printf("    sub x0, x29, #%d\n", -node->var->offset);
+        return;
+    case ND_DEREF:
+        gen_expr(node->lhs);
         return;
     }
 
@@ -46,6 +52,13 @@ static void gen_expr(Node *node) {
     case ND_VAR:
         gen_addr(node);
         printf("    ldr x0, [x0]\n");
+        return;
+    case ND_DEREF:
+        gen_expr(node->lhs);
+        printf("    ldr x0, [x0]\n");
+        return;
+    case ND_ADDR:
+        gen_addr(node->lhs);
         return;
     case ND_ASSIGN:
         gen_addr(node->lhs);
