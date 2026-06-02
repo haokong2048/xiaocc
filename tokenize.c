@@ -60,6 +60,16 @@ static bool startswith(char *p, char *q) {
     return strncmp(p, q, strlen(q)) == 0;
 }
 
+// 如果 c 是标识符的首字符，返回 true
+static bool is_ident1(char c) {
+    return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
+}
+
+// 如果 c 是标识符的非首字符，返回 true
+static bool is_ident2(char c) {
+    return is_ident1(c) || ('0' <= c && c <= '9');
+}
+
 // 从 p 读取标点符号并返回其长度
 static int read_punct(char *p) {
     if (startswith(p, "==") || startswith(p, "!=") ||
@@ -92,9 +102,12 @@ Token *tokenize(char *p) {
         }
 
         // 标识符
-        if ('a' <= *p && *p <= 'z') {
-            cur = cur->next = new_token(TK_IDENT, p, p + 1);
-            p++;
+        if (is_ident1(*p)) {
+            char *start = p;
+            do {
+                p++;
+            } while (is_ident2(*p));
+            cur = cur->next = new_token(TK_IDENT, start, p);
             continue;
         }
 

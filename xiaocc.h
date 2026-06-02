@@ -1,6 +1,7 @@
 #ifndef XIAOCC_H
 #define XIAOCC_H
 
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <ctype.h>
 #include <stdarg.h>
@@ -9,10 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct Node Node;
+
 //
 // tokenize.c
 //
 
+// Token
 typedef enum {
     TK_IDENT, // 标识符
     TK_PUNCT, // 标点符号
@@ -41,6 +45,23 @@ Token *tokenize(char *input);
 // parse.c
 //
 
+// 局部变量
+typedef struct Obj Obj;
+struct Obj {
+    Obj *next;
+    char *name; // 变量名
+    int offset; // 相对于 RBP 的偏移量
+};
+
+// 函数
+typedef struct Function Function;
+struct Function {
+    Node *body;
+    Obj *locals;
+    int stack_size;
+};
+
+// AST 节点
 typedef enum {
     ND_ADD,       // +
     ND_SUB,       // -
@@ -58,22 +79,21 @@ typedef enum {
 } NodeKind;
 
 // AST 节点类型
-typedef struct Node Node;
 struct Node {
     NodeKind kind; // 节点类型
     Node *next;    // 下一个节点
     Node *lhs;     // 左操作数
     Node *rhs;     // 右操作数
-    char name;     // 如果类型是 ND_VAR，存储变量名
+    Obj *var;      // 如果类型是 ND_VAR，存储变量引用
     int val;       // 如果类型是 ND_NUM，存储其值
 };
 
-Node *parse(Token *tok);
+Function *parse(Token *tok);
 
 //
 // codegen.c
 //
 
-void codegen(Node *node);
+void codegen(Function *prog);
 
 #endif

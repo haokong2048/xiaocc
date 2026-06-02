@@ -12,12 +12,16 @@ static void pop(char *arg) {
     depth--;
 }
 
+// 将 n 向上取整到 align 的倍数
+static int align_to(int n, int align) {
+    return (n + align - 1) / align * align;
+}
+
 // 计算给定节点的绝对地址
 // 如果节点不在内存中则报错
 static void gen_addr(Node *node) {
     if (node->kind == ND_VAR) {
-        int offset = (node->name - 'a' + 1) * 8;
-        printf("    sub x0, x29, #%d\n", offset);
+        printf("    sub x0, x29, #%d\n", -node->var->offset);
         return;
     }
 
@@ -95,22 +99,34 @@ static void gen_stmt(Node *node) {
     error("invalid statement");
 }
 
-void codegen(Node *node) {
+// 为局部变量分配偏移量
+static void assign_lvar_offsets(Function *prog) {
+    int offset = 0;
+    for (Obj *var = prog->locals; var; var = var->next) {
+        offset += 8;
+        var->offset = -offset;
+    }
+    prog->stack_size = align_to(offset, 16);
+}
+
+void codegen(Function *prog) {
+    assign_lvar_offsets(prog);
+
     printf("    .global main\n");
     printf("main:\n");
 
     // 函数序言
     printf("    stp x29, x30, [sp, #-16]!\n");
     printf("    mov x29, sp\n");
-    printf("    sub sp, sp, #208\n");
+    printf("    sub sp, sp, #%d\n", prog->stack_size);
 
-    for (Node *n = node; n; n = n->next) {
+    for (Node *n = prog->body; n; n = n->next) {
         gen_stmt(n);
         assert(depth == 0);
     }
 
     // 函数尾声
-    printf("    add sp, sp, #208\n");
+    printf("    add sp, sp, #%d\n", prog->stack_size);
     printf("    ldp x29, x30, [sp], #16\n");
     printf("    ret\n");
 }
