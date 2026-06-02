@@ -21,6 +21,9 @@ struct Token {
     int len;        // Token 长度
 };
 
+// 当前输入字符串
+static char *current_input;
+
 // 报告错误并退出
 static void error(char *fmt, ...) {
     va_list ap;
@@ -28,6 +31,29 @@ static void error(char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     exit(1);
+}
+
+// 报告错误位置并退出
+static void verror_at(char *loc, char *fmt, va_list ap) {
+    int pos = loc - current_input;
+    fprintf(stderr, "%s\n", current_input);
+    fprintf(stderr, "%*s", pos, ""); // 打印 pos 个空格
+    fprintf(stderr, "^ ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    exit(1);
+}
+
+static void error_at(char *loc, char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    verror_at(loc, fmt, ap);
+}
+
+static void error_tok(Token *tok, char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    verror_at(tok->loc, fmt, ap);
 }
 
 // 判断当前 Token 是否匹配字符串 op
@@ -38,14 +64,14 @@ static bool equal(Token *tok, char *op) {
 // 确保当前 Token 为 s
 static Token *skip(Token *tok, char *s) {
     if (!equal(tok, s))
-        error("expected '%s'", s);
+        error_tok(tok, "expected '%s'", s);
     return tok->next;
 }
 
 // 确保当前 Token 为 TK_NUM
 static int get_number(Token *tok) {
     if (tok->kind != TK_NUM)
-        error("expected a number");
+        error_tok(tok, "expected a number");
     return tok->val;
 }
 
@@ -58,8 +84,9 @@ static Token *new_token(TokenKind kind, char *start, char *end) {
     return tok;
 }
 
-// 对字符串 p 进行词法分析，返回 Token 链表
-static Token *tokenize(char *p) {
+// 对 current_input 进行词法分析，返回 Token 链表
+static Token *tokenize(void) {
+    char *p = current_input;
     Token head = {};
     Token *cur = &head;
 
@@ -86,7 +113,7 @@ static Token *tokenize(char *p) {
             continue;
         }
 
-        error("invalid token");
+        error_at(p, "invalid token");
     }
 
     cur = cur->next = new_token(TK_EOF, p, p);
@@ -97,7 +124,8 @@ int main(int argc, char **argv) {
     if (argc != 2)
         error("%s: invalid number of arguments", argv[0]);
 
-    Token *tok = tokenize(argv[1]);
+    current_input = argv[1];
+    Token *tok = tokenize();
 
     printf("    .global main\n");
     printf("main:\n");
