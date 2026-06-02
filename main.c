@@ -73,13 +73,6 @@ static Token *skip(Token *tok, char *s) {
     return tok->next;
 }
 
-// 确保当前 Token 为 TK_NUM
-static int get_number(Token *tok) {
-    if (tok->kind != TK_NUM)
-        error_tok(tok, "expected a number");
-    return tok->val;
-}
-
 // 创建一个新的 Token
 static Token *new_token(TokenKind kind, char *start, char *end) {
     Token *tok = calloc(1, sizeof(Token));
@@ -87,6 +80,19 @@ static Token *new_token(TokenKind kind, char *start, char *end) {
     tok->loc = start;
     tok->len = end - start;
     return tok;
+}
+
+static bool startswith(char *p, char *q) {
+    return strncmp(p, q, strlen(q)) == 0;
+}
+
+// 从 p 读取标点符号并返回其长度
+static int read_punct(char *p) {
+    if (startswith(p, "==") || startswith(p, "!=") ||
+        startswith(p, "<=") || startswith(p, ">="))
+        return 2;
+
+    return ispunct(*p) ? 1 : 0;
 }
 
 // 对 current_input 进行词法分析，返回 Token 链表
@@ -112,9 +118,10 @@ static Token *tokenize(void) {
         }
 
         // 标点符号
-        if (ispunct(*p)) {
-            cur = cur->next = new_token(TK_PUNCT, p, p + 1);
-            p++;
+        int punct_len = read_punct(p);
+        if (punct_len) {
+            cur = cur->next = new_token(TK_PUNCT, p, p + punct_len);
+            p += cur->len;
             continue;
         }
 
@@ -135,6 +142,10 @@ typedef enum {
     ND_MUL, // *
     ND_DIV, // /
     ND_NEG, // 一元负号
+    ND_EQ,  // ==
+    ND_NE,  // !=
+    ND_LT,  // <
+    ND_LE,  // <=
     ND_NUM, // 整数
 } NodeKind;
 
@@ -173,12 +184,70 @@ static Node *new_num(int val) {
 }
 
 static Node *expr(Token **rest, Token *tok);
+static Node *equality(Token **rest, Token *tok);
+static Node *relational(Token **rest, Token *tok);
+static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// expr = mul ("+" mul | "-" mul)*
+// expr = equality
 static Node *expr(Token **rest, Token *tok) {
+    return equality(rest, tok);
+}
+
+// equality = relational ("==" relational | "!=" relational)*
+static Node *equality(Token **rest, Token *tok) {
+    Node *node = relational(&tok, tok);
+
+    for (;;) {
+        if (equal(tok, "==")) {
+            node = new_binary(ND_EQ, node, relational(&tok, tok->next));
+            continue;
+        }
+
+        if (equal(tok, "!=")) {
+            node = new_binary(ND_NE, node, relational(&tok, tok->next));
+            continue;
+        }
+
+        *rest = tok;
+        return node;
+    }
+}
+
+// relational = add ("<" add | "<=" add | ">" add | ">=" add)*
+static Node *relational(Token **rest, Token *tok) {
+    Node *node = add(&tok, tok);
+
+    for (;;) {
+        if (equal(tok, "<")) {
+            node = new_binary(ND_LT, node, add(&tok, tok->next));
+            continue;
+        }
+
+        if (equal(tok, "<=")) {
+            node = new_binary(ND_LE, node, add(&tok, tok->next));
+            continue;
+        }
+
+        if (equal(tok, ">")) {
+            node = new_binary(ND_LT, add(&tok, tok->next), node);
+            continue;
+        }
+
+        if (equal(tok, ">=")) {
+            node = new_binary(ND_LE, add(&tok, tok->next), node);
+            continue;
+        }
+
+        *rest = tok;
+        return node;
+    }
+}
+
+// add = mul ("+" mul | "-" mul)*
+static Node *add(Token **rest, Token *tok) {
     Node *node = mul(&tok, tok);
 
     for (;;) {
@@ -290,6 +359,22 @@ static void gen_expr(Node *node) {
         return;
     case ND_DIV:
         printf("    sdiv x0, x0, x1\n");
+        return;
+    case ND_EQ:
+    case ND_NE:
+    case ND_LT:
+    case ND_LE:
+        printf("    cmp x0, x1\n");
+
+        if (node->kind == ND_EQ)
+            printf("    cset x0, eq\n");
+        else if (node->kind == ND_NE)
+            printf("    cset x0, ne\n");
+        else if (node->kind == ND_LT)
+            printf("    cset x0, lt\n");
+        else if (node->kind == ND_LE)
+            printf("    cset x0, le\n");
+
         return;
     }
 
