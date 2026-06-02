@@ -41,22 +41,24 @@ Token *tokenize(char *input);
 //
 
 typedef enum {
-    ND_ADD, // +
-    ND_SUB, // -
-    ND_MUL, // *
-    ND_DIV, // /
-    ND_NEG, // 一元负号
-    ND_EQ,  // ==
-    ND_NE,  // !=
-    ND_LT,  // <
-    ND_LE,  // <=
-    ND_NUM, // 整数
+    ND_ADD,       // +
+    ND_SUB,       // -
+    ND_MUL,       // *
+    ND_DIV,       // /
+    ND_NEG,       // 一元负号
+    ND_EQ,        // ==
+    ND_NE,        // !=
+    ND_LT,        // <
+    ND_LE,        // <=
+    ND_EXPR_STMT, // 表达式语句
+    ND_NUM,       // 整数
 } NodeKind;
 
 // AST 节点类型
 typedef struct Node Node;
 struct Node {
     NodeKind kind; // 节点类型
+    Node *next;    // 下一个节点
     Node *lhs;     // 左操作数
     Node *rhs;     // 右操作数
     int val;       // 如果类型是 ND_NUM，存储其值
