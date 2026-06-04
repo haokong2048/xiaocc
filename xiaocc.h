@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct Type Type;
 typedef struct Node Node;
 
 //
@@ -90,6 +91,7 @@ struct Node {
     NodeKind kind; // 节点类型
     Node *next;    // 下一个节点
     Token *tok;    // 代表 Token
+    Type *ty;      // 类型，例如 int 或指向 int 的指针
     Node *lhs;     // 左操作数
     Node *rhs;     // 右操作数
 
@@ -108,6 +110,25 @@ struct Node {
 };
 
 Function *parse(Token *tok);
+
+//
+// type.c
+//
+
+typedef enum {
+    TY_INT,
+    TY_PTR,
+} TypeKind;
+
+struct Type {
+    TypeKind kind;
+    Type *base;
+};
+
+extern Type *ty_int;
+
+bool is_integer(Type *ty);
+void add_type(Node *node);
 
 //
 // codegen.c

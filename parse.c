@@ -22,6 +22,7 @@
 static Obj *locals;
 
 static Node *compound_stmt(Token **rest, Token *tok);
+static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
@@ -145,8 +146,10 @@ static Node *compound_stmt(Token **rest, Token *tok) {
 
     Node head = {};
     Node *cur = &head;
-    while (!equal(tok, "}"))
+    while (!equal(tok, "}")) {
         cur = cur->next = stmt(&tok, tok);
+        add_type(cur);
+    }
 
     node->body = head.next;
     *rest = tok->next;
@@ -236,6 +239,62 @@ static Node *relational(Token **rest, Token *tok) {
     }
 }
 
+// 在 C 语言中，`+` 运算符被重载以执行指针算术运算。
+// 如果 p 是指针，p+n 不会将 n 加到 p 的值上，而是加上 sizeof(*p)*n,
+// 这样 p+n 就指向 p 之后 n 个元素（而非 n 个字节）的位置。
+// 换句话说，我们需要将整数值缩放后再加到指针值上。
+// 此函数负责处理这种缩放。
+static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
+    add_type(lhs);
+    add_type(rhs);
+
+    // num + num
+    if (is_integer(lhs->ty) && is_integer(rhs->ty))
+        return new_binary(ND_ADD, lhs, rhs, tok);
+
+    if (lhs->ty->base && rhs->ty->base)
+        error_tok(tok, "invalid operands");
+
+    // 将 `num + ptr` 规范化为 `ptr + num`
+    if (!lhs->ty->base && rhs->ty->base) {
+        Node *tmp = lhs;
+        lhs = rhs;
+        rhs = tmp;
+    }
+
+    // ptr + num
+    rhs = new_binary(ND_MUL, rhs, new_num(8, tok), tok);
+    return new_binary(ND_ADD, lhs, rhs, tok);
+}
+
+// 类似 `+`，`-` 运算符也针对指针类型进行了重载。
+static Node *new_sub(Node *lhs, Node *rhs, Token *tok) {
+    add_type(lhs);
+    add_type(rhs);
+
+    // num - num
+    if (is_integer(lhs->ty) && is_integer(rhs->ty))
+        return new_binary(ND_SUB, lhs, rhs, tok);
+
+    // ptr - num
+    if (lhs->ty->base && is_integer(rhs->ty)) {
+        rhs = new_binary(ND_MUL, rhs, new_num(8, tok), tok);
+        add_type(rhs);
+        Node *node = new_binary(ND_SUB, lhs, rhs, tok);
+        node->ty = lhs->ty;
+        return node;
+    }
+
+    // ptr - ptr，返回两个指针之间的元素个数。
+    if (lhs->ty->base && rhs->ty->base) {
+        Node *node = new_binary(ND_SUB, lhs, rhs, tok);
+        node->ty = ty_int;
+        return new_binary(ND_DIV, node, new_num(8, tok), tok);
+    }
+
+    error_tok(tok, "invalid operands");
+}
+
 // add = mul ("+" mul | "-" mul)*
 static Node *add(Token **rest, Token *tok) {
     Node *node = mul(&tok, tok);
@@ -244,12 +303,12 @@ static Node *add(Token **rest, Token *tok) {
         Token *start = tok;
 
         if (equal(tok, "+")) {
-            node = new_binary(ND_ADD, node, mul(&tok, tok->next), start);
+            node = new_add(node, mul(&tok, tok->next), start);
             continue;
         }
 
         if (equal(tok, "-")) {
-            node = new_binary(ND_SUB, node, mul(&tok, tok->next), start);
+            node = new_sub(node, mul(&tok, tok->next), start);
             continue;
         }
 
