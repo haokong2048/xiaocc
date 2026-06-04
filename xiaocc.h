@@ -83,6 +83,7 @@ typedef enum {
     ND_IF,        // "if"
     ND_FOR,       // "for" or "while"
     ND_BLOCK,     // { ... }
+    ND_FUNCALL,   // 函数调用
     ND_EXPR_STMT, // 表达式语句
     ND_VAR,       // 变量
     ND_NUM,       // 整数
@@ -106,6 +107,9 @@ struct Node {
 
     // 块
     Node *body;
+
+    // 函数调用
+    char *funcname;
 
     Obj *var;      // 如果类型是 ND_VAR，存储变量引用
     int val;       // 如果类型是 ND_NUM，存储其值
