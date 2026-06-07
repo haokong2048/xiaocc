@@ -25,7 +25,7 @@ struct VarScope {
     Obj *var;
 };
 
-// 结构体标签的作用域
+// 结构体或联合体的标签作用域
 typedef struct TagScope TagScope;
 struct TagScope {
     TagScope *next;
@@ -65,6 +65,7 @@ static Node *relational(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
+static Type *union_decl(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *funcall(Token **rest, Token *tok);
@@ -211,6 +212,9 @@ static Type *declspec(Token **rest, Token *tok) {
     if (equal(tok, "struct"))
         return struct_decl(rest, tok->next);
 
+    if (equal(tok, "union"))
+        return union_decl(rest, tok->next);
+
     error_tok(tok, "typename expected");
 }
 
@@ -297,7 +301,8 @@ static Node *declaration(Token **rest, Token *tok) {
 
 // 如果给定的 token 表示一个类型名则返回 true
 static bool is_typename(Token *tok) {
-    return equal(tok, "char") || equal(tok, "int") || equal(tok, "struct");
+    return equal(tok, "char") || equal(tok, "int") || equal(tok, "struct") ||
+           equal(tok, "union");
 }
 
 // stmt = "return" expr ";"
@@ -614,9 +619,9 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
     ty->members = head.next;
 }
 
-// struct-decl = ident? "{" struct-members
-static Type *struct_decl(Token **rest, Token *tok) {
-    // 读取结构体标签
+// struct-union-decl = ident? ("{" struct-members)?
+static Type *struct_union_decl(Token **rest, Token *tok) {
+    // 读取标签
     Token *tag = NULL;
     if (tok->kind == TK_IDENT) {
         tag = tok;
@@ -631,11 +636,22 @@ static Type *struct_decl(Token **rest, Token *tok) {
         return ty;
     }
 
-    // 构造结构体对象
+    // 构造结构体或联合体对象
     Type *ty = calloc(1, sizeof(Type));
     ty->kind = TY_STRUCT;
     struct_members(rest, tok->next, ty);
     ty->align = 1;
+
+    // 如果给出了名称，注册类型
+    if (tag)
+        push_tag_scope(tag, ty);
+    return ty;
+}
+
+// struct-decl = struct-union-decl
+static Type *struct_decl(Token **rest, Token *tok) {
+    Type *ty = struct_union_decl(rest, tok);
+    ty->kind = TY_STRUCT;
 
     // 为结构体成员分配偏移量
     int offset = 0;
@@ -648,10 +664,23 @@ static Type *struct_decl(Token **rest, Token *tok) {
             ty->align = mem->ty->align;
     }
     ty->size = align_to(offset, ty->align);
+    return ty;
+}
 
-    // 如果给出了名称，注册结构体类型
-    if (tag)
-        push_tag_scope(tag, ty);
+// union-decl = struct-union-decl
+static Type *union_decl(Token **rest, Token *tok) {
+    Type *ty = struct_union_decl(rest, tok);
+    ty->kind = TY_UNION;
+
+    // 对于联合体，我们不需要分配偏移量，因为所有成员
+    // 偏移量已初始化为零。但需要计算对齐和大小。
+    for (Member *mem = ty->members; mem; mem = mem->next) {
+        if (ty->align < mem->ty->align)
+            ty->align = mem->ty->align;
+        if (ty->size < mem->ty->size)
+            ty->size = mem->ty->size;
+    }
+    ty->size = align_to(ty->size, ty->align);
     return ty;
 }
 
@@ -665,8 +694,8 @@ static Member *get_struct_member(Type *ty, Token *tok) {
 
 static Node *struct_ref(Node *lhs, Token *tok) {
     add_type(lhs);
-    if (lhs->ty->kind != TY_STRUCT)
-        error_tok(lhs->tok, "not a struct");
+    if (lhs->ty->kind != TY_STRUCT && lhs->ty->kind != TY_UNION)
+        error_tok(lhs->tok, "not a struct nor a union");
 
     Node *node = new_unary(ND_MEMBER, lhs, tok);
     node->member = get_struct_member(lhs->ty, tok);
