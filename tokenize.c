@@ -19,7 +19,7 @@ void error(char *fmt, ...) {
 //
 // foo.c:10: x = y + 1;
 //               ^ <错误信息>
-static void verror_at(char *loc, char *fmt, va_list ap) {
+static void verror_at(int line_no, char *loc, char *fmt, va_list ap) {
     // 查找包含 loc 的行
     char *line = loc;
     while (current_input < line && line[-1] != '\n')
@@ -28,12 +28,6 @@ static void verror_at(char *loc, char *fmt, va_list ap) {
     char *end = loc;
     while (*end != '\n')
         end++;
-
-    // 获取行号
-    int line_no = 1;
-    for (char *p = current_input; p < line; p++)
-        if (*p == '\n')
-            line_no++;
 
     // 打印该行
     int indent = fprintf(stderr, "%s:%d: ", current_filename, line_no);
@@ -50,15 +44,20 @@ static void verror_at(char *loc, char *fmt, va_list ap) {
 }
 
 void error_at(char *loc, char *fmt, ...) {
+    int line_no = 1;
+    for (char *p = current_input; p < loc; p++)
+        if (*p == '\n')
+            line_no++;
+
     va_list ap;
     va_start(ap, fmt);
-    verror_at(loc, fmt, ap);
+    verror_at(line_no, loc, fmt, ap);
 }
 
 void error_tok(Token *tok, char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    verror_at(tok->loc, fmt, ap);
+    verror_at(tok->line_no, tok->loc, fmt, ap);
 }
 
 // 判断当前 Token 是否匹配字符串 op
@@ -213,6 +212,21 @@ static Token *read_string_literal(char *start) {
     return tok;
 }
 
+// 为所有 token 初始化行号信息
+static void add_line_numbers(Token *tok) {
+    char *p = current_input;
+    int n = 1;
+
+    do {
+        if (p == tok->loc) {
+            tok->line_no = n;
+            tok = tok->next;
+        }
+        if (*p == '\n')
+            n++;
+    } while (*p++);
+}
+
 static void convert_keywords(Token *tok) {
     for (Token *t = tok; t->kind != TK_EOF; t = t->next)
         if (is_keyword(t))
@@ -288,6 +302,7 @@ static Token *tokenize(char *filename, char *p) {
     }
 
     cur = cur->next = new_token(TK_EOF, p, p);
+    add_line_numbers(head.next);
     convert_keywords(head.next);
     return head.next;
 }
