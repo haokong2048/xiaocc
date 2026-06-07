@@ -2,7 +2,6 @@
 
 static FILE *output_file;
 static int depth;
-static char *argreg8[] = {"w0", "w1", "w2", "w3", "w4", "w5"};
 static char *argreg64[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
 static Obj *current_fn;
 
@@ -41,6 +40,8 @@ static void load(Type *ty) {
 
     if (ty->size == 1)
         println("    ldrsb x0, [x0]");
+    else if (ty->size == 4)
+        println("    ldrsw x0, [x0]");
     else
         println("    ldr x0, [x0]");
 }
@@ -59,6 +60,8 @@ static void store(Type *ty) {
 
     if (ty->size == 1)
         println("    strb w0, [x1]");
+    else if (ty->size == 4)
+        println("    str w0, [x1]");
     else
         println("    str x0, [x1]");
 }
@@ -275,6 +278,21 @@ static void emit_data(Obj *prog) {
     }
 }
 
+static void store_gp(int r, int offset, int sz) {
+    switch (sz) {
+    case 1:
+        println("    strb w%d, [x29, #%d]", r, offset);
+        return;
+    case 4:
+        println("    str w%d, [x29, #%d]", r, offset);
+        return;
+    case 8:
+        println("    str x%d, [x29, #%d]", r, offset);
+        return;
+    }
+    unreachable();
+}
+
 static void emit_text(Obj *prog) {
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (!fn->is_function)
@@ -292,12 +310,8 @@ static void emit_text(Obj *prog) {
 
         // 将寄存器传入的参数保存到栈中
         int i = 0;
-        for (Obj *var = fn->params; var; var = var->next) {
-            if (var->ty->size == 1)
-                println("    strb %s, [x29, #%d]", argreg8[i++], var->offset);
-            else
-                println("    str %s, [x29, #%d]", argreg64[i++], var->offset);
-        }
+        for (Obj *var = fn->params; var; var = var->next)
+            store_gp(i++, var->offset, var->ty->size);
 
         gen_stmt(fn->body);
         assert(depth == 0);
