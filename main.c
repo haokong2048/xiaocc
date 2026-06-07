@@ -55,6 +55,7 @@ int main(int argc, char **argv) {
 
     // 遍历 AST 生成汇编
     FILE *out = open_file(opt_o);
+    fprintf(out, ".file 1 \"%s\"\n", input_path);
     codegen(prog, out);
     return 0;
 }
