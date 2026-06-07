@@ -6,6 +6,7 @@ static char *argreg64[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
 static Obj *current_fn;
 
 static void gen_expr(Node *node);
+static void gen_stmt(Node *node);
 
 // 从 x0 指向的地址加载值。
 // 如果是数组类型则不加载，因为无法将整个数组加载到寄存器中。
@@ -98,6 +99,10 @@ static void gen_expr(Node *node) {
         push();
         gen_expr(node->rhs);
         store(node->ty);
+        return;
+    case ND_STMT_EXPR:
+        for (Node *n = node->body; n; n = n->next)
+            gen_stmt(n);
         return;
     case ND_FUNCALL: {
         int nargs = 0;
