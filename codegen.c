@@ -197,6 +197,11 @@ void codegen(Function *prog) {
         printf("    mov x29, sp\n");
         printf("    sub sp, sp, #%d\n", fn->stack_size);
 
+        // 将寄存器传入的参数保存到栈中
+        int i = 0;
+        for (Obj *var = fn->params; var; var = var->next)
+            printf("    str %s, [x29, #%d]\n", argreg[i++], var->offset);
+
         gen_stmt(fn->body);
         assert(depth == 0);
 
