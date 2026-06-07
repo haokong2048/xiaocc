@@ -2,6 +2,7 @@
 
 static int depth;
 static char *argreg[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
+static Function *current_fn;
 
 static void gen_expr(Node *node);
 
@@ -161,7 +162,7 @@ static void gen_stmt(Node *node) {
         return;
     case ND_RETURN:
         gen_expr(node->lhs);
-        printf("    b .L.return\n");
+        printf("    b .L.return.%s\n", current_fn->name);
         return;
     case ND_EXPR_STMT:
         gen_expr(node->lhs);
@@ -173,32 +174,37 @@ static void gen_stmt(Node *node) {
 
 // 为局部变量分配偏移量
 static void assign_lvar_offsets(Function *prog) {
-    int offset = 0;
-    for (Obj *var = prog->locals; var; var = var->next) {
-        offset += 8;
-        var->offset = -offset;
+    for (Function *fn = prog; fn; fn = fn->next) {
+        int offset = 0;
+        for (Obj *var = fn->locals; var; var = var->next) {
+            offset += 8;
+            var->offset = -offset;
+        }
+        fn->stack_size = align_to(offset, 16);
     }
-    prog->stack_size = align_to(offset, 16);
 }
 
 void codegen(Function *prog) {
     assign_lvar_offsets(prog);
 
-    printf("    .global main\n");
-    printf("main:\n");
+    for (Function *fn = prog; fn; fn = fn->next) {
+        printf("    .global %s\n", fn->name);
+        printf("%s:\n", fn->name);
+        current_fn = fn;
 
-    // 函数序言
-    printf("    stp x29, x30, [sp, #-16]!\n");
-    printf("    mov x29, sp\n");
-    printf("    sub sp, sp, #%d\n", prog->stack_size);
+        // 函数序言
+        printf("    stp x29, x30, [sp, #-16]!\n");
+        printf("    mov x29, sp\n");
+        printf("    sub sp, sp, #%d\n", fn->stack_size);
 
-    gen_stmt(prog->body);
-    assert(depth == 0);
+        gen_stmt(fn->body);
+        assert(depth == 0);
 
-    printf(".L.return:\n");
+        printf(".L.return.%s:\n", fn->name);
 
-    // 函数尾声
-    printf("    add sp, sp, #%d\n", prog->stack_size);
-    printf("    ldp x29, x30, [sp], #16\n");
-    printf("    ret\n");
+        // 函数尾声
+        printf("    add sp, sp, #%d\n", fn->stack_size);
+        printf("    ldp x29, x30, [sp], #16\n");
+        printf("    ret\n");
+    }
 }
