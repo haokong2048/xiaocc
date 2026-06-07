@@ -25,16 +25,29 @@ struct VarScope {
     Obj *var;
 };
 
+// 结构体标签的作用域
+typedef struct TagScope TagScope;
+struct TagScope {
+    TagScope *next;
+    char *name;
+    Type *ty;
+};
+
 // 表示一个块作用域
 typedef struct Scope Scope;
 struct Scope {
     Scope *next;
+
+    // C 语言有两类块作用域：一个用于变量，一个用于结构体标签
     VarScope *vars;
+    TagScope *tags;
 };
 
 // 解析过程中创建的所有局部变量实例
 // 都被累积到这个链表中
 static Obj *locals;
+
+// 同样地，全局变量也被累积到这个链表中
 static Obj *globals;
 
 static Scope *scope = &(Scope){};
@@ -73,6 +86,14 @@ static Obj *find_var(Token *tok) {
         for (VarScope *sc2 = sc->vars; sc2; sc2 = sc2->next)
             if (equal(tok, sc2->name))
                 return sc2->var;
+    return NULL;
+}
+
+static Type *find_tag(Token *tok) {
+    for (Scope *sc = scope; sc; sc = sc->next)
+        for (TagScope *sc2 = sc->tags; sc2; sc2 = sc2->next)
+            if (equal(tok, sc2->name))
+                return sc2->ty;
     return NULL;
 }
 
@@ -165,6 +186,14 @@ static int get_number(Token *tok) {
     if (tok->kind != TK_NUM)
         error_tok(tok, "expected a number");
     return tok->val;
+}
+
+static void push_tag_scope(Token *tok, Type *ty) {
+    TagScope *sc = calloc(1, sizeof(TagScope));
+    sc->name = strndup(tok->loc, tok->len);
+    sc->ty = ty;
+    sc->next = scope->tags;
+    scope->tags = sc;
 }
 
 // declspec = "char" | "int" | struct-decl
@@ -585,14 +614,27 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
     ty->members = head.next;
 }
 
-// struct-decl = "{" struct-members
+// struct-decl = ident? "{" struct-members
 static Type *struct_decl(Token **rest, Token *tok) {
-    tok = skip(tok, "{");
+    // 读取结构体标签
+    Token *tag = NULL;
+    if (tok->kind == TK_IDENT) {
+        tag = tok;
+        tok = tok->next;
+    }
+
+    if (tag && !equal(tok, "{")) {
+        Type *ty = find_tag(tag);
+        if (!ty)
+            error_tok(tag, "unknown struct type");
+        *rest = tok;
+        return ty;
+    }
 
     // 构造结构体对象
     Type *ty = calloc(1, sizeof(Type));
     ty->kind = TY_STRUCT;
-    struct_members(rest, tok, ty);
+    struct_members(rest, tok->next, ty);
     ty->align = 1;
 
     // 为结构体成员分配偏移量
@@ -607,6 +649,9 @@ static Type *struct_decl(Token **rest, Token *tok) {
     }
     ty->size = align_to(offset, ty->align);
 
+    // 如果给出了名称，注册结构体类型
+    if (tag)
+        push_tag_scope(tag, ty);
     return ty;
 }
 
