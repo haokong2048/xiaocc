@@ -1,7 +1,8 @@
 #include "xiaocc.h"
 
 static int depth;
-static char *argreg[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
+static char *argreg8[] = {"w0", "w1", "w2", "w3", "w4", "w5"};
+static char *argreg64[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
 static Obj *current_fn;
 
 static void gen_expr(Node *node);
@@ -12,7 +13,11 @@ static void gen_expr(Node *node);
 static void load(Type *ty) {
     if (ty->kind == TY_ARRAY)
         return;
-    printf("    ldr x0, [x0]\n");
+
+    if (ty->size == 1)
+        printf("    ldrsb x0, [x0]\n");
+    else
+        printf("    ldr x0, [x0]\n");
 }
 
 static int count(void) {
@@ -31,9 +36,13 @@ static void pop(char *arg) {
 }
 
 // 将 x0 存储到栈顶指向的地址中
-static void store(void) {
+static void store(Type *ty) {
     pop("x1");
-    printf("    str x0, [x1]\n");
+
+    if (ty->size == 1)
+        printf("    strb w0, [x1]\n");
+    else
+        printf("    str x0, [x1]\n");
 }
 
 // 将 n 向上取整到 align 的倍数
@@ -88,7 +97,7 @@ static void gen_expr(Node *node) {
         gen_addr(node->lhs);
         push();
         gen_expr(node->rhs);
-        store();
+        store(node->ty);
         return;
     case ND_FUNCALL: {
         int nargs = 0;
@@ -99,7 +108,7 @@ static void gen_expr(Node *node) {
         }
 
         for (int i = nargs - 1; i >= 0; i--)
-            pop(argreg[i]);
+            pop(argreg64[i]);
 
         printf("    bl %s\n", node->funcname);
         return;
@@ -237,8 +246,12 @@ static void emit_text(Obj *prog) {
 
         // 将寄存器传入的参数保存到栈中
         int i = 0;
-        for (Obj *var = fn->params; var; var = var->next)
-            printf("    str %s, [x29, #%d]\n", argreg[i++], var->offset);
+        for (Obj *var = fn->params; var; var = var->next) {
+            if (var->ty->size == 1)
+                printf("    strb %s, [x29, #%d]\n", argreg8[i++], var->offset);
+            else
+                printf("    str %s, [x29, #%d]\n", argreg64[i++], var->offset);
+        }
 
         gen_stmt(fn->body);
         assert(depth == 0);
