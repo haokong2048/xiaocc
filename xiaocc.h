@@ -13,6 +13,7 @@
 
 typedef struct Type Type;
 typedef struct Node Node;
+typedef struct Member Member;
 
 //
 // strings.c
@@ -97,6 +98,7 @@ typedef enum {
     ND_LE,        // <=
     ND_ASSIGN,    // =
     ND_COMMA,     // ,
+    ND_MEMBER,    // . (结构体成员访问)
     ND_ADDR,      // 一元 &
     ND_DEREF,     // 一元 *
     ND_RETURN,    // "return"
@@ -129,6 +131,9 @@ struct Node {
     // 块或语句表达式
     Node *body;
 
+    // 结构体成员访问
+    Member *member;
+
     // 函数调用
     char *funcname;
     Node *args;
@@ -149,6 +154,7 @@ typedef enum {
     TY_PTR,
     TY_FUNC,
     TY_ARRAY,
+    TY_STRUCT,
 } TypeKind;
 
 struct Type {
@@ -171,10 +177,21 @@ struct Type {
     // 数组
     int array_len;
 
+    // 结构体
+    Member *members;
+
     // 函数类型
     Type *return_ty;
     Type *params;
     Type *next;
+};
+
+// 结构体成员
+struct Member {
+    Member *next;
+    Type *ty;
+    Token *name;
+    int offset;
 };
 
 extern Type *ty_char;
