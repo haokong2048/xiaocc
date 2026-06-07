@@ -56,7 +56,7 @@ static void store(Type *ty) {
 }
 
 // 将 n 向上取整到 align 的倍数
-static int align_to(int n, int align) {
+int align_to(int n, int align) {
     return (n + align - 1) / align * align;
 }
 

@@ -160,6 +160,7 @@ typedef enum {
 struct Type {
     TypeKind kind;
     int size;      // sizeof() 值
+    int align;     // 对齐
 
     // 指针或数组的基类型。我们有意使用同一个成员
     // 来表示 C 语言中的指针/数组二元性。
@@ -209,5 +210,6 @@ void add_type(Node *node);
 //
 
 void codegen(Obj *prog, FILE *out);
+int align_to(int n, int align);
 
 #endif
