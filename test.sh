@@ -18,7 +18,7 @@ assert() {
     expected="$1"
     input="$2"
 
-    echo "$input" | "$QEMU" ./xiaocc - > tmp.s || exit
+    echo "$input" | "$QEMU" ./xiaocc -o tmp.s - || exit
     "$CC" -static -o tmp tmp.s tmp2.o
     "$QEMU" ./tmp
     actual="$?"

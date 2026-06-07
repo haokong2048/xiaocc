@@ -13,6 +13,7 @@ $(OBJS): xiaocc.h
 
 test: xiaocc
 	./test.sh
+	./test-driver.sh
 
 clean:
 	rm -f xiaocc *.o *~ tmp*
