@@ -99,7 +99,21 @@ static bool is_keyword(Token *tok) {
     return false;
 }
 
-static int read_escaped_char(char *p) {
+static int read_escaped_char(char **new_pos, char *p) {
+    if ('0' <= *p && *p <= '7') {
+        // 读取八进制数
+        int c = *p++ - '0';
+        if ('0' <= *p && *p <= '7') {
+            c = (c << 3) + (*p++ - '0');
+            if ('0' <= *p && *p <= '7')
+                c = (c << 3) + (*p++ - '0');
+        }
+        *new_pos = p;
+        return c;
+    }
+
+    *new_pos = p + 1;
+
     // 转义序列在此用它们自身来定义。例如 '\n' 用 '\n' 来实现。
     // 这种同义反复的定义之所以可行，是因为编译我们编译器的编译器
     // 知道 '\n' 的实际含义。换句话说，我们从编译器的编译器中
@@ -140,12 +154,10 @@ static Token *read_string_literal(char *start) {
     int len = 0;
 
     for (char *p = start + 1; p < end;) {
-        if (*p == '\\') {
-            buf[len++] = read_escaped_char(p + 1);
-            p += 2;
-        } else {
+        if (*p == '\\')
+            buf[len++] = read_escaped_char(&p, p + 1);
+        else
             buf[len++] = *p++;
-        }
     }
 
     Token *tok = new_token(TK_STR, start, end + 1);
