@@ -693,6 +693,14 @@ static Node *postfix(Token **rest, Token *tok) {
             continue;
         }
 
+        if (equal(tok, "->")) {
+            // x->y 等价于 (*x).y
+            node = new_unary(ND_DEREF, node, tok);
+            node = struct_ref(node, tok->next);
+            tok = tok->next->next;
+            continue;
+        }
+
         *rest = tok;
         return node;
     }
