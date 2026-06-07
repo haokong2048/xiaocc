@@ -1,6 +1,7 @@
 #include "xiaocc.h"
 
 static int depth;
+static char *argreg[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
 
 static void gen_expr(Node *node);
 
@@ -67,9 +68,20 @@ static void gen_expr(Node *node) {
         pop("x1");
         printf("    str x0, [x1]\n");
         return;
-    case ND_FUNCALL:
+    case ND_FUNCALL: {
+        int nargs = 0;
+        for (Node *arg = node->args; arg; arg = arg->next) {
+            gen_expr(arg);
+            push();
+            nargs++;
+        }
+
+        for (int i = nargs - 1; i >= 0; i--)
+            pop(argreg[i]);
+
         printf("    bl %s\n", node->funcname);
         return;
+    }
     }
 
     gen_expr(node->rhs);

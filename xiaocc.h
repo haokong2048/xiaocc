@@ -110,6 +110,7 @@ struct Node {
 
     // 函数调用
     char *funcname;
+    Node *args;
 
     Obj *var;      // 如果类型是 ND_VAR，存储变量引用
     int val;       // 如果类型是 ND_NUM，存储其值
