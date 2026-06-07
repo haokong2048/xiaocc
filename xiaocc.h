@@ -130,16 +130,28 @@ typedef enum {
     TY_INT,
     TY_PTR,
     TY_FUNC,
+    TY_ARRAY,
 } TypeKind;
 
 struct Type {
     TypeKind kind;
+    int size;      // sizeof() 值
 
-    // 指针
+    // 指针或数组的基类型。我们有意使用同一个成员
+    // 来表示 C 语言中的指针/数组二元性。
+    //
+    // 在许多需要指针的上下文中，我们检查此成员
+    // 而非 "kind" 成员来判断类型是否为指针。
+    // 这意味着在许多上下文中，"array of T"
+    // 会被自然地当作 "pointer to T" 处理，符合
+    // C 语言规范的要求。
     Type *base;
 
     // 声明
     Token *name;
+
+    // 数组
+    int array_len;
 
     // 函数类型
     Type *return_ty;
@@ -153,6 +165,7 @@ bool is_integer(Type *ty);
 Type *copy_type(Type *ty);
 Type *pointer_to(Type *base);
 Type *func_type(Type *return_ty);
+Type *array_of(Type *base, int size);
 void add_type(Node *node);
 
 //

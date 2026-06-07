@@ -6,6 +6,15 @@ static Function *current_fn;
 
 static void gen_expr(Node *node);
 
+// 从 x0 指向的地址加载值。
+// 如果是数组类型则不加载，因为无法将整个数组加载到寄存器中。
+// 这也就是 C 语言中"数组会自动转换为指向首元素的指针"发生的地方。
+static void load(Type *ty) {
+    if (ty->kind == TY_ARRAY)
+        return;
+    printf("    ldr x0, [x0]\n");
+}
+
 static int count(void) {
     static int i = 1;
     return i++;
@@ -19,6 +28,12 @@ static void push(void) {
 static void pop(char *arg) {
     printf("    ldr %s, [sp], #16\n", arg);
     depth--;
+}
+
+// 将 x0 存储到栈顶指向的地址中
+static void store(void) {
+    pop("x1");
+    printf("    str x0, [x1]\n");
 }
 
 // 将 n 向上取整到 align 的倍数
@@ -53,11 +68,11 @@ static void gen_expr(Node *node) {
         return;
     case ND_VAR:
         gen_addr(node);
-        printf("    ldr x0, [x0]\n");
+        load(node->ty);
         return;
     case ND_DEREF:
         gen_expr(node->lhs);
-        printf("    ldr x0, [x0]\n");
+        load(node->ty);
         return;
     case ND_ADDR:
         gen_addr(node->lhs);
@@ -66,8 +81,7 @@ static void gen_expr(Node *node) {
         gen_addr(node->lhs);
         push();
         gen_expr(node->rhs);
-        pop("x1");
-        printf("    str x0, [x1]\n");
+        store();
         return;
     case ND_FUNCALL: {
         int nargs = 0;
@@ -177,7 +191,7 @@ static void assign_lvar_offsets(Function *prog) {
     for (Function *fn = prog; fn; fn = fn->next) {
         int offset = 0;
         for (Obj *var = fn->locals; var; var = var->next) {
-            offset += 8;
+            offset += var->ty->size;
             var->offset = -offset;
         }
         fn->stack_size = align_to(offset, 16);
