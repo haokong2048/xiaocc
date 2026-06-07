@@ -40,6 +40,8 @@ static void load(Type *ty) {
 
     if (ty->size == 1)
         println("    ldrsb x0, [x0]");
+    else if (ty->size == 2)
+        println("    ldrsh x0, [x0]");
     else if (ty->size == 4)
         println("    ldrsw x0, [x0]");
     else
@@ -60,6 +62,8 @@ static void store(Type *ty) {
 
     if (ty->size == 1)
         println("    strb w0, [x1]");
+    else if (ty->size == 2)
+        println("    strh w0, [x1]");
     else if (ty->size == 4)
         println("    str w0, [x1]");
     else
@@ -282,6 +286,9 @@ static void store_gp(int r, int offset, int sz) {
     switch (sz) {
     case 1:
         println("    strb w%d, [x29, #%d]", r, offset);
+        return;
+    case 2:
+        println("    strh w%d, [x29, #%d]", r, offset);
         return;
     case 4:
         println("    str w%d, [x29, #%d]", r, offset);
