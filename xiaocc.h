@@ -22,6 +22,7 @@ typedef enum {
     TK_IDENT,   // 标识符
     TK_PUNCT,   // 标点符号
     TK_KEYWORD, // 关键字
+    TK_STR,     // 字符串字面量
     TK_NUM,     // 数字字面量
     TK_EOF,     // 文件结束标记
 } TokenKind;
@@ -34,6 +35,8 @@ struct Token {
     int val;        // 如果类型是 TK_NUM，存储其值
     char *loc;      // Token 位置
     int len;        // Token 长度
+    Type *ty;       // 如果类型是 TK_STR 则使用
+    char *str;      // 字符串字面量内容（含结尾 '\0'）
 };
 
 void error(char *fmt, ...);
@@ -61,6 +64,9 @@ struct Obj {
 
     // 全局变量或函数
     bool is_function;
+
+    // 全局变量
+    char *init_data;
 
     // 函数
     Obj *params;
