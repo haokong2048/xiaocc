@@ -99,15 +99,58 @@ static bool is_keyword(Token *tok) {
     return false;
 }
 
-static Token *read_string_literal(char *start) {
-    char *p = start + 1;
-    for (; *p != '"'; p++)
+static int read_escaped_char(char *p) {
+    // 转义序列在此用它们自身来定义。例如 '\n' 用 '\n' 来实现。
+    // 这种同义反复的定义之所以可行，是因为编译我们编译器的编译器
+    // 知道 '\n' 的实际含义。换句话说，我们从编译器的编译器中
+    // "继承"了 '\n' 的 ASCII 码，因此无需在此手动编写实际代码。
+    //
+    // 这一事实不仅对编译器的正确性有重大影响，对生成代码的安全性
+    // 也是如此。详见 Ken Thompson 的 "Reflections on Trusting Trust"。
+    // https://github.com/rui314/chibicc/wiki/thompson1984.pdf
+    switch (*p) {
+    case 'a': return '\a';
+    case 'b': return '\b';
+    case 't': return '\t';
+    case 'n': return '\n';
+    case 'v': return '\v';
+    case 'f': return '\f';
+    case 'r': return '\r';
+    // [GNU] \e 表示 ASCII 转义字符，是 GNU C 扩展
+    case 'e': return 27;
+    default: return *p;
+    }
+}
+
+// 查找字符串的结束双引号
+static char *string_literal_end(char *p) {
+    char *start = p;
+    for (; *p != '"'; p++) {
         if (*p == '\n' || *p == '\0')
             error_at(start, "unclosed string literal");
+        if (*p == '\\')
+            p++;
+    }
+    return p;
+}
 
-    Token *tok = new_token(TK_STR, start, p + 1);
-    tok->ty = array_of(ty_char, p - start);
-    tok->str = strndup(start + 1, p - start - 1);
+static Token *read_string_literal(char *start) {
+    char *end = string_literal_end(start + 1);
+    char *buf = calloc(1, end - start);
+    int len = 0;
+
+    for (char *p = start + 1; p < end;) {
+        if (*p == '\\') {
+            buf[len++] = read_escaped_char(p + 1);
+            p += 2;
+        } else {
+            buf[len++] = *p++;
+        }
+    }
+
+    Token *tok = new_token(TK_STR, start, end + 1);
+    tok->ty = array_of(ty_char, len + 1);
+    tok->str = buf;
     return tok;
 }
 
