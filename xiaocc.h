@@ -48,22 +48,22 @@ Token *tokenize(char *input);
 // parse.c
 //
 
-// 局部变量
+// 变量或函数
 typedef struct Obj Obj;
 struct Obj {
     Obj *next;
-    char *name; // 变量名
-    Type *ty;   // 类型
-    int offset; // 相对于 RBP 的偏移量
-};
+    char *name;    // 变量名
+    Type *ty;      // 类型
+    bool is_local; // 局部变量还是全局变量/函数
 
-// 函数
-typedef struct Function Function;
-struct Function {
-    Function *next;
-    char *name;
+    // 局部变量
+    int offset; // 相对于帧指针的偏移量
+
+    // 全局变量或函数
+    bool is_function;
+
+    // 函数
     Obj *params;
-
     Node *body;
     Obj *locals;
     int stack_size;
@@ -120,7 +120,7 @@ struct Node {
     int val;       // 如果类型是 ND_NUM，存储其值
 };
 
-Function *parse(Token *tok);
+Obj *parse(Token *tok);
 
 //
 // type.c
@@ -172,6 +172,6 @@ void add_type(Node *node);
 // codegen.c
 //
 
-void codegen(Function *prog);
+void codegen(Obj *prog);
 
 #endif
