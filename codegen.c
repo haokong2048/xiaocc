@@ -36,7 +36,7 @@ static void pop(char *arg) {
 // 如果是数组类型则不加载，因为无法将整个数组加载到寄存器中。
 // 这也就是 C 语言中"数组会自动转换为指向首元素的指针"发生的地方。
 static void load(Type *ty) {
-    if (ty->kind == TY_ARRAY)
+    if (ty->kind == TY_ARRAY || ty->kind == TY_STRUCT || ty->kind == TY_UNION)
         return;
 
     if (ty->size == 1)
@@ -48,6 +48,14 @@ static void load(Type *ty) {
 // 将 x0 存储到栈顶指向的地址中
 static void store(Type *ty) {
     pop("x1");
+
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        for (int i = 0; i < ty->size; i++) {
+            println("    ldrb w2, [x0, #%d]", i);
+            println("    strb w2, [x1, #%d]", i);
+        }
+        return;
+    }
 
     if (ty->size == 1)
         println("    strb w0, [x1]");
