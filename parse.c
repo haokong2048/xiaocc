@@ -52,6 +52,7 @@ static Obj *globals;
 
 static Scope *scope = &(Scope){};
 
+static bool is_typename(Token *tok);
 static Type *declspec(Token **rest, Token *tok);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
 static Node *declaration(Token **rest, Token *tok);
@@ -197,41 +198,86 @@ static void push_tag_scope(Token *tok, Type *ty) {
     scope->tags = sc;
 }
 
-// declspec = "void" | "char" | "short" | "int" | "long"
-//          | struct-decl | union-decl
+// declspec = ("void" | "char" | "short" | "int" | "long"
+//             | struct-decl | union-decl)+
+//
+// 类型说明符中的类型名顺序无关紧要。例如，
+// `int long static` 与 `static long int` 含义相同。
+// 也可以写成 `static long`，因为如果指定了 `long` 或 `short`，
+// 就可以省略 `int`。但像 `char int` 这样的组合不是有效的类型说明符。
+// 我们只接受有限组合的类型名。
+//
+// 在此函数中，我们记录每个类型名出现的次数，
+// 同时维护一个表示当前类型的"当前"类型对象。
+// 当遇到非类型名 token 时，返回当前类型对象。
 static Type *declspec(Token **rest, Token *tok) {
-    if (equal(tok, "void")) {
-        *rest = tok->next;
-        return ty_void;
+    // 使用单个整数作为所有类型名的计数器。
+    // 例如，第 0、1 位表示关键字 "void" 出现的次数。
+    // 这样我们就可以使用下面所示的 switch 语句。
+    enum {
+        VOID  = 1 << 0,
+        CHAR  = 1 << 2,
+        SHORT = 1 << 4,
+        INT   = 1 << 6,
+        LONG  = 1 << 8,
+        OTHER = 1 << 10,
+    };
+
+    Type *ty = ty_int;
+    int counter = 0;
+
+    while (is_typename(tok)) {
+        // 处理用户自定义类型。
+        if (equal(tok, "struct") || equal(tok, "union")) {
+            if (equal(tok, "struct"))
+                ty = struct_decl(&tok, tok->next);
+            else
+                ty = union_decl(&tok, tok->next);
+            counter += OTHER;
+            continue;
+        }
+
+        // 处理内建类型。
+        if (equal(tok, "void"))
+            counter += VOID;
+        else if (equal(tok, "char"))
+            counter += CHAR;
+        else if (equal(tok, "short"))
+            counter += SHORT;
+        else if (equal(tok, "int"))
+            counter += INT;
+        else if (equal(tok, "long"))
+            counter += LONG;
+        else
+            unreachable();
+
+        switch (counter) {
+        case VOID:
+            ty = ty_void;
+            break;
+        case CHAR:
+            ty = ty_char;
+            break;
+        case SHORT:
+        case SHORT + INT:
+            ty = ty_short;
+            break;
+        case INT:
+            ty = ty_int;
+            break;
+        case LONG:
+        case LONG + INT:
+            ty = ty_long;
+            break;
+        default:
+            error_tok(tok, "invalid type");
+        }
+
+        tok = tok->next;
     }
 
-    if (equal(tok, "char")) {
-        *rest = tok->next;
-        return ty_char;
-    }
-
-    if (equal(tok, "short")) {
-        *rest = tok->next;
-        return ty_short;
-    }
-
-    if (equal(tok, "int")) {
-        *rest = tok->next;
-        return ty_int;
-    }
-
-    if (equal(tok, "long")) {
-        *rest = tok->next;
-        return ty_long;
-    }
-
-    if (equal(tok, "struct"))
-        return struct_decl(rest, tok->next);
-
-    if (equal(tok, "union"))
-        return union_decl(rest, tok->next);
-
-    error_tok(tok, "typename expected");
+    *rest = tok;
+    return ty;
 }
 
 // func-params = (param ("," param)*)? ")"
