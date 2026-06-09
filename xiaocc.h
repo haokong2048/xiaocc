@@ -142,6 +142,7 @@ struct Node {
 
     // 函数调用
     char *funcname;
+    Type *func_ty;
     Node *args;
 
     Obj *var;      // 如果类型是 ND_VAR，存储变量引用
