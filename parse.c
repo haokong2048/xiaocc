@@ -56,6 +56,9 @@ static Obj *locals;
 // 同样地，全局变量也被累积到这个链表中
 static Obj *globals;
 
+// 指向解析器当前正在解析的函数对象
+static Obj *current_fn;
+
 static Scope *scope = &(Scope){};
 
 static bool is_typename(Token *tok);
@@ -473,8 +476,11 @@ static bool is_typename(Token *tok) {
 static Node *stmt(Token **rest, Token *tok) {
     if (equal(tok, "return")) {
         Node *node = new_node(ND_RETURN, tok);
-        node->lhs = expr(&tok, tok->next);
+        Node *exp = expr(&tok, tok->next);
         *rest = skip(tok, ";");
+
+        add_type(exp);
+        node->lhs = new_cast(exp, current_fn->ty->return_ty);
         return node;
     }
 
@@ -1043,6 +1049,7 @@ static Token *function(Token *tok, Type *basety) {
     if (!fn->is_definition)
         return tok;
 
+    current_fn = fn;
     locals = NULL;
     enter_scope();
     create_param_lvars(ty->params);
