@@ -197,7 +197,7 @@ static void push_tag_scope(Token *tok, Type *ty) {
     scope->tags = sc;
 }
 
-// declspec = "char" | "int" | "long" | struct-decl | union-decl
+// declspec = "char" | "short" | "int" | "long" | struct-decl | union-decl
 static Type *declspec(Token **rest, Token *tok) {
     if (equal(tok, "char")) {
         *rest = tok->next;
@@ -843,6 +843,10 @@ static Token *function(Token *tok, Type *basety) {
 
     Obj *fn = new_gvar(get_ident(ty->name), ty);
     fn->is_function = true;
+    fn->is_definition = !consume(&tok, tok, ";");
+
+    if (!fn->is_definition)
+        return tok;
 
     locals = NULL;
     enter_scope();
