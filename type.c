@@ -47,6 +47,26 @@ Type *array_of(Type *base, int len) {
     return ty;
 }
 
+static Type *get_common_type(Type *ty1, Type *ty2) {
+    if (ty1->base)
+        return pointer_to(ty1->base);
+    if (ty1->size == 8 || ty2->size == 8)
+        return ty_long;
+    return ty_int;
+}
+
+// 对于许多二元运算符，我们会隐式提升操作数，
+// 使两个操作数具有相同的类型。任何小于 int 的整数类型
+// 总是被提升为 int。如果一个操作数的类型比另一个大
+//（例如 "long" vs "int"），较小的操作数会被提升以匹配。
+//
+// 此操作称为"常规算术转换"。
+static void usual_arith_conv(Node **lhs, Node **rhs) {
+    Type *ty = get_common_type((*lhs)->ty, (*rhs)->ty);
+    *lhs = new_cast(*lhs, ty);
+    *rhs = new_cast(*rhs, ty);
+}
+
 void add_type(Node *node) {
     if (!node || node->ty)
         return;
@@ -65,23 +85,36 @@ void add_type(Node *node) {
         add_type(n);
 
     switch (node->kind) {
+    case ND_NUM:
+        node->ty = (node->val == (int)node->val) ? ty_int : ty_long;
+        return;
     case ND_ADD:
     case ND_SUB:
     case ND_MUL:
     case ND_DIV:
-    case ND_NEG:
+        usual_arith_conv(&node->lhs, &node->rhs);
         node->ty = node->lhs->ty;
         return;
+    case ND_NEG: {
+        Type *ty = get_common_type(ty_int, node->lhs->ty);
+        node->lhs = new_cast(node->lhs, ty);
+        node->ty = ty;
+        return;
+    }
     case ND_ASSIGN:
         if (node->lhs->ty->kind == TY_ARRAY)
             error_tok(node->lhs->tok, "not an lvalue");
+        if (node->lhs->ty->kind != TY_STRUCT)
+            node->rhs = new_cast(node->rhs, node->lhs->ty);
         node->ty = node->lhs->ty;
         return;
     case ND_EQ:
     case ND_NE:
     case ND_LT:
     case ND_LE:
-    case ND_NUM:
+        usual_arith_conv(&node->lhs, &node->rhs);
+        node->ty = ty_int;
+        return;
     case ND_FUNCALL:
         node->ty = ty_long;
         return;

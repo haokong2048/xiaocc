@@ -105,14 +105,65 @@ static void gen_addr(Node *node) {
     error_tok(node->tok, "not an lvalue");
 }
 
+enum { I8, I16, I32, I64 };
+
+static int getTypeId(Type *ty) {
+    switch (ty->kind) {
+    case TY_CHAR:
+        return I8;
+    case TY_SHORT:
+        return I16;
+    case TY_INT:
+        return I32;
+    }
+    return I64;
+}
+
+// ARM64 类型转换：使用符号扩展指令处理截断和扩展。
+// sxtb: 符号扩展 8→32, sxth: 符号扩展 16→32, sxtw: 符号扩展 32→64
+static char i32i8[]  = "sxtb w0, w0";
+static char i32i16[] = "sxth w0, w0";
+static char i64i32[] = "sxtw x0, w0";
+
+static char *cast_table[][10] = {
+    // i8  i16 i32 i64
+    {NULL,  NULL,   NULL, NULL},    // i8
+    {i32i8, NULL,   NULL, NULL},    // i16
+    {i32i8, i32i16, NULL, i64i32},  // i32
+    {i32i8, i32i16, NULL, NULL},    // i64
+};
+
+static void cast(Type *from, Type *to) {
+    if (to->kind == TY_VOID)
+        return;
+
+    int t1 = getTypeId(from);
+    int t2 = getTypeId(to);
+    if (cast_table[t1][t2])
+        println("    %s", cast_table[t1][t2]);
+}
+
 // 为给定节点生成代码
 static void gen_expr(Node *node) {
     println("    .loc 1 %d", node->tok->line_no);
 
     switch (node->kind) {
-    case ND_NUM:
-        println("    mov x0, #%ld", node->val);
+    case ND_NUM: {
+        uint64_t val = (uint64_t)node->val;
+        bool first = true;
+        for (int shift = 0; shift < 64; shift += 16) {
+            int chunk = (int)((val >> shift) & 0xFFFF);
+            if (shift == 0 || chunk != 0) {
+                if (first) {
+                    println("    movz x0, #%d", chunk);
+                    first = false;
+                } else {
+                    println("    movk x0, #%d, lsl #%d", chunk, shift);
+                }
+            }
+        }
         return;
+    }
     case ND_NEG:
         gen_expr(node->lhs);
         println("    neg x0, x0");
@@ -143,6 +194,10 @@ static void gen_expr(Node *node) {
         gen_expr(node->lhs);
         gen_expr(node->rhs);
         return;
+    case ND_CAST:
+        gen_expr(node->lhs);
+        cast(node->lhs->ty, node->ty);
+        return;
     case ND_FUNCALL: {
         int nargs = 0;
         for (Node *arg = node->args; arg; arg = arg->next) {
@@ -164,24 +219,33 @@ static void gen_expr(Node *node) {
     gen_expr(node->lhs);
     pop("x1");
 
+    char *r0, *r1;
+    if (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) {
+        r0 = "x0";
+        r1 = "x1";
+    } else {
+        r0 = "w0";
+        r1 = "w1";
+    }
+
     switch (node->kind) {
     case ND_ADD:
-        println("    add x0, x0, x1");
+        println("    add %s, %s, %s", r0, r0, r1);
         return;
     case ND_SUB:
-        println("    sub x0, x0, x1");
+        println("    sub %s, %s, %s", r0, r0, r1);
         return;
     case ND_MUL:
-        println("    mul x0, x0, x1");
+        println("    mul %s, %s, %s", r0, r0, r1);
         return;
     case ND_DIV:
-        println("    sdiv x0, x0, x1");
+        println("    sdiv %s, %s, %s", r0, r0, r1);
         return;
     case ND_EQ:
     case ND_NE:
     case ND_LT:
     case ND_LE:
-        println("    cmp x0, x1");
+        println("    cmp %s, %s", r0, r1);
 
         if (node->kind == ND_EQ)
             println("    cset x0, eq");

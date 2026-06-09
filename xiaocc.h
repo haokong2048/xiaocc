@@ -115,6 +115,7 @@ typedef enum {
     ND_STMT_EXPR, // 语句表达式 (GNU 扩展)
     ND_VAR,       // 变量
     ND_NUM,       // 整数
+    ND_CAST,      // 类型转换
 } NodeKind;
 
 // AST 节点类型
@@ -147,6 +148,7 @@ struct Node {
     int64_t val;   // 如果类型是 ND_NUM，存储其值
 };
 
+Node *new_cast(Node *expr, Type *ty);
 Obj *parse(Token *tok);
 
 //
