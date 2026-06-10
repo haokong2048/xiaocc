@@ -17,16 +17,18 @@
 
 #include "xiaocc.h"
 
-// 局部变量、全局变量或类型定义的作用域
+// 局部变量、全局变量、类型定义或枚举常量的作用域
 typedef struct VarScope VarScope;
 struct VarScope {
     VarScope *next;
     char *name;
     Obj *var;
     Type *type_def;
+    Type *enum_ty;
+    int enum_val;
 };
 
-// 结构体或联合体的标签作用域
+// 结构体、联合体或枚举的标签作用域
 typedef struct TagScope TagScope;
 struct TagScope {
     TagScope *next;
@@ -39,7 +41,7 @@ typedef struct Scope Scope;
 struct Scope {
     Scope *next;
 
-    // C 语言有两类块作用域：一个用于变量，一个用于结构体标签
+    // C 语言有两类块作用域：一个用于变量/typedef，一个用于结构体/联合体/枚举标签
     VarScope *vars;
     TagScope *tags;
 };
@@ -77,6 +79,7 @@ static Node *mul(Token **rest, Token *tok);
 static Node *cast(Token **rest, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
 static Type *union_decl(Token **rest, Token *tok);
+static Type *enum_specifier(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *funcall(Token **rest, Token *tok);
@@ -237,7 +240,8 @@ static void push_tag_scope(Token *tok, Type *ty) {
 
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
 //             | "typedef"
-//             | struct-decl | union-decl | typedef-name)+
+//             | struct-decl | union-decl | typedef-name
+//             | enum-specifier)+
 //
 // 类型说明符中的类型名顺序无关紧要。例如，
 // `int long static` 与 `static long int` 含义相同。
@@ -277,7 +281,7 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
 
         // 处理用户自定义类型
         Type *ty2 = find_typedef(tok);
-        if (equal(tok, "struct") || equal(tok, "union") || ty2) {
+        if (equal(tok, "struct") || equal(tok, "union") || equal(tok, "enum") || ty2) {
             if (counter)
                 break;
 
@@ -285,6 +289,8 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
                 ty = struct_decl(&tok, tok->next);
             } else if (equal(tok, "union")) {
                 ty = union_decl(&tok, tok->next);
+            } else if (equal(tok, "enum")) {
+                ty = enum_specifier(&tok, tok->next);
             } else {
                 ty = ty2;
                 tok = tok->next;
@@ -429,6 +435,59 @@ static Type *typename(Token **rest, Token *tok) {
     return abstract_declarator(rest, tok, ty);
 }
 
+// enum-specifier = ident? "{" enum-list? "}"
+//                | ident ("{" enum-list? "}")?
+//
+// enum-list      = ident ("=" num)? ("," ident ("=" num)?)*
+static Type *enum_specifier(Token **rest, Token *tok) {
+    Type *ty = enum_type();
+
+    // 读取枚举标签
+    Token *tag = NULL;
+    if (tok->kind == TK_IDENT) {
+        tag = tok;
+        tok = tok->next;
+    }
+
+    if (tag && !equal(tok, "{")) {
+        Type *ty = find_tag(tag);
+        if (!ty)
+            error_tok(tag, "未知的枚举类型");
+        if (ty->kind != TY_ENUM)
+            error_tok(tag, "不是枚举标签");
+        *rest = tok;
+        return ty;
+    }
+
+    tok = skip(tok, "{");
+
+    // 读取枚举列表
+    int i = 0;
+    int val = 0;
+    while (!equal(tok, "}")) {
+        if (i++ > 0)
+            tok = skip(tok, ",");
+
+        char *name = get_ident(tok);
+        tok = tok->next;
+
+        if (equal(tok, "=")) {
+            val = get_number(tok->next);
+            tok = tok->next->next;
+        }
+
+        VarScope *sc = push_scope(name);
+        sc->enum_ty = ty;
+        sc->enum_val = val++;
+    }
+
+    *rest = tok->next;
+
+    if (tag)
+        push_tag_scope(tag, ty);
+    return ty;
+}
+
 // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
 static Node *declaration(Token **rest, Token *tok, Type *basety) {
     Node head = {};
@@ -464,7 +523,7 @@ static Node *declaration(Token **rest, Token *tok, Type *basety) {
 static bool is_typename(Token *tok) {
     static char *kw[] = {
         "void", "_Bool", "char", "short", "int", "long", "struct", "union",
-        "typedef",
+        "typedef", "enum",
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -1014,12 +1073,19 @@ static Node *primary(Token **rest, Token *tok) {
         if (equal(tok->next, "("))
             return funcall(rest, tok);
 
-        // 变量
+        // 变量或枚举常量
         VarScope *sc = find_var(tok);
-        if (!sc || !sc->var)
-            error_tok(tok, "undefined variable");
+        if (!sc || (!sc->var && !sc->enum_ty))
+            error_tok(tok, "未定义的变量");
+
+        Node *node;
+        if (sc->var)
+            node = new_var_node(sc->var, tok);
+        else
+            node = new_num(sc->enum_val, tok);
+
         *rest = tok->next;
-        return new_var_node(sc->var, tok);
+        return node;
     }
 
     if (tok->kind == TK_STR) {
