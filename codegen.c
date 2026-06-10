@@ -213,6 +213,10 @@ static void gen_expr(Node *node) {
         println("    cmp x0, #0");
         println("    cset x0, eq");
         return;
+    case ND_BITNOT:
+        gen_expr(node->lhs);
+        println("    mvn x0, x0");
+        return;
     case ND_CAST:
         gen_expr(node->lhs);
         cast(node->lhs->ty, node->ty);
