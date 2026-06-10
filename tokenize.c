@@ -216,6 +216,26 @@ static Token *read_string_literal(char *start) {
     return tok;
 }
 
+static Token *read_char_literal(char *start) {
+    char *p = start + 1;
+    if (*p == '\0')
+        error_at(start, "字符字面量未闭合");
+
+    char c;
+    if (*p == '\\')
+        c = read_escaped_char(&p, p + 1);
+    else
+        c = *p++;
+
+    char *end = strchr(p, '\'');
+    if (!end)
+        error_at(p, "字符字面量未闭合");
+
+    Token *tok = new_token(TK_NUM, start, end + 1);
+    tok->val = c;
+    return tok;
+}
+
 // 为所有 token 初始化行号信息
 static void add_line_numbers(Token *tok) {
     char *p = current_input;
@@ -280,6 +300,13 @@ static Token *tokenize(char *filename, char *p) {
         // 字符串字面量
         if (*p == '"') {
             cur = cur->next = read_string_literal(p);
+            p += cur->len;
+            continue;
+        }
+
+        // 字符字面量
+        if (*p == '\'') {
+            cur = cur->next = read_char_literal(p);
             p += cur->len;
             continue;
         }
