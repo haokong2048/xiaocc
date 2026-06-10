@@ -217,6 +217,36 @@ static void gen_expr(Node *node) {
         gen_expr(node->lhs);
         println("    mvn x0, x0");
         return;
+    case ND_LOGAND: {
+        int c = count();
+        gen_expr(node->lhs);
+        println("    cmp x0, #0");
+        println("    b.eq .L.false.%d", c);
+        gen_expr(node->rhs);
+        println("    cmp x0, #0");
+        println("    b.eq .L.false.%d", c);
+        println("    mov x0, #1");
+        println("    b .L.end.%d", c);
+        println(".L.false.%d:", c);
+        println("    mov x0, #0");
+        println(".L.end.%d:", c);
+        return;
+    }
+    case ND_LOGOR: {
+        int c = count();
+        gen_expr(node->lhs);
+        println("    cmp x0, #0");
+        println("    b.ne .L.true.%d", c);
+        gen_expr(node->rhs);
+        println("    cmp x0, #0");
+        println("    b.ne .L.true.%d", c);
+        println("    mov x0, #0");
+        println("    b .L.end.%d", c);
+        println(".L.true.%d:", c);
+        println("    mov x0, #1");
+        println(".L.end.%d:", c);
+        return;
+    }
     case ND_CAST:
         gen_expr(node->lhs);
         cast(node->lhs->ty, node->ty);
