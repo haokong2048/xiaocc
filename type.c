@@ -120,6 +120,9 @@ void add_type(Node *node) {
         usual_arith_conv(&node->lhs, &node->rhs);
         node->ty = ty_int;
         return;
+    case ND_NOT:
+        node->ty = ty_int;
+        return;
     case ND_FUNCALL:
         node->ty = ty_long;
         return;

@@ -108,6 +108,7 @@ typedef enum {
     ND_MEMBER,    // . (结构体成员访问)
     ND_ADDR,      // 一元 &
     ND_DEREF,     // 一元 *
+    ND_NOT,       // !
     ND_RETURN,    // "return"
     ND_IF,        // "if"
     ND_FOR,       // "for" or "while"

@@ -208,6 +208,11 @@ static void gen_expr(Node *node) {
         gen_expr(node->lhs);
         gen_expr(node->rhs);
         return;
+    case ND_NOT:
+        gen_expr(node->lhs);
+        println("    cmp x0, #0");
+        println("    cset x0, eq");
+        return;
     case ND_CAST:
         gen_expr(node->lhs);
         cast(node->lhs->ty, node->ty);
