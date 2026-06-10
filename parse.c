@@ -46,9 +46,10 @@ struct Scope {
     TagScope *tags;
 };
 
-// 变量属性，如 typedef 或 extern
+// 变量属性，如 typedef 或 static
 typedef struct {
     bool is_typedef;
+    bool is_static;
 } VarAttr;
 
 // 解析过程中创建的所有局部变量实例
@@ -239,7 +240,7 @@ static void push_tag_scope(Token *tok, Type *ty) {
 }
 
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
-//             | "typedef"
+//             | "typedef" | "static"
 //             | struct-decl | union-decl | typedef-name
 //             | enum-specifier)+
 //
@@ -270,11 +271,18 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
     int counter = 0;
 
     while (is_typename(tok)) {
-        // 处理 "typedef" 关键字
-        if (equal(tok, "typedef")) {
+        // 处理存储类说明符
+        if (equal(tok, "typedef") || equal(tok, "static")) {
             if (!attr)
                 error_tok(tok, "storage class specifier is not allowed in this context");
-            attr->is_typedef = true;
+
+            if (equal(tok, "typedef"))
+                attr->is_typedef = true;
+            else
+                attr->is_static = true;
+
+            if (attr->is_typedef + attr->is_static > 1)
+                error_tok(tok, "typedef 和 static 不能同时使用");
             tok = tok->next;
             continue;
         }
@@ -523,7 +531,7 @@ static Node *declaration(Token **rest, Token *tok, Type *basety) {
 static bool is_typename(Token *tok) {
     static char *kw[] = {
         "void", "_Bool", "char", "short", "int", "long", "struct", "union",
-        "typedef", "enum",
+        "typedef", "enum", "static",
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -1124,12 +1132,13 @@ static void create_param_lvars(Type *param) {
     }
 }
 
-static Token *function(Token *tok, Type *basety) {
+static Token *function(Token *tok, Type *basety, VarAttr *attr) {
     Type *ty = declarator(&tok, tok, basety);
 
     Obj *fn = new_gvar(get_ident(ty->name), ty);
     fn->is_function = true;
     fn->is_definition = !consume(&tok, tok, ";");
+    fn->is_static = attr->is_static;
 
     if (!fn->is_definition)
         return tok;
@@ -1187,7 +1196,7 @@ Obj *parse(Token *tok) {
 
         // 函数定义
         if (is_function(tok)) {
-            tok = function(tok, basety);
+            tok = function(tok, basety, &attr);
             continue;
         }
 
