@@ -1698,6 +1698,11 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
         }
     }
 
+    // 如果最后一个元素是不完整类型的数组，则称为
+    // "灵活数组成员"。它应该表现得像零长度数组一样。
+    if (cur != &head && cur->ty->kind == TY_ARRAY && cur->ty->array_len < 0)
+        cur->ty = array_of(cur->ty->base, 0);
+
     *rest = tok->next;
     ty->members = head.next;
 }
