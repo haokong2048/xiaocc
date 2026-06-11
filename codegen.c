@@ -265,6 +265,16 @@ static void gen_expr(Node *node) {
         gen_expr(node->lhs);
         cast(node->lhs->ty, node->ty);
         return;
+    case ND_MEMZERO: {
+        int c = count();
+        println("    mov w1, #%d", node->var->ty->size);
+        println("    add x0, x29, #%d", node->var->offset);
+        println(".L.memzero.%d:", c);
+        println("    strb wzr, [x0], #1");
+        println("    sub w1, w1, #1");
+        println("    cbnz w1, .L.memzero.%d", c);
+        return;
+    }
     case ND_FUNCALL: {
         int nargs = 0;
         for (Node *arg = node->args; arg; arg = arg->next) {
