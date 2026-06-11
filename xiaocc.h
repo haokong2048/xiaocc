@@ -120,6 +120,8 @@ typedef enum {
     ND_IF,        // "if"
     ND_FOR,       // "for" or "while"
     ND_BLOCK,     // { ... }
+    ND_GOTO,      // "goto"
+    ND_LABEL,     // 标签语句
     ND_FUNCALL,   // 函数调用
     ND_EXPR_STMT, // 表达式语句
     ND_STMT_EXPR, // 语句表达式 (GNU 扩展)
@@ -154,6 +156,11 @@ struct Node {
     char *funcname;
     Type *func_ty;
     Node *args;
+
+    // goto 或标签语句
+    char *label;
+    char *unique_label;
+    Node *goto_next;
 
     Obj *var;      // 如果类型是 ND_VAR，存储变量引用
     int64_t val;   // 如果类型是 ND_NUM，存储其值

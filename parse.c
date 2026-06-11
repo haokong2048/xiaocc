@@ -62,6 +62,10 @@ static Obj *globals;
 // 指向解析器当前正在解析的函数对象
 static Obj *current_fn;
 
+// 当前函数中所有 goto 语句和标签的链表
+static Node *gotos;
+static Node *labels;
+
 static Scope *scope = &(Scope){};
 
 static bool is_typename(Token *tok);
@@ -573,6 +577,8 @@ static bool is_typename(Token *tok) {
 //      | "if" "(" expr ")" stmt ("else" stmt)?
 //      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
 //      | "while" "(" expr ")" stmt
+//      | "goto" ident ";"
+//      | ident ":" stmt
 //      | "{" compound-stmt
 //      | expr-stmt
 static Node *stmt(Token **rest, Token *tok) {
@@ -630,6 +636,25 @@ static Node *stmt(Token **rest, Token *tok) {
         node->cond = expr(&tok, tok);
         tok = skip(tok, ")");
         node->then = stmt(rest, tok);
+        return node;
+    }
+
+    if (equal(tok, "goto")) {
+        Node *node = new_node(ND_GOTO, tok);
+        node->label = get_ident(tok->next);
+        node->goto_next = gotos;
+        gotos = node;
+        *rest = skip(tok->next->next, ";");
+        return node;
+    }
+
+    if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
+        Node *node = new_node(ND_LABEL, tok);
+        node->label = strndup(tok->loc, tok->len);
+        node->unique_label = new_unique_name();
+        node->lhs = stmt(rest, tok->next->next);
+        node->goto_next = labels;
+        labels = node;
         return node;
     }
 
@@ -1334,6 +1359,27 @@ static void create_param_lvars(Type *param) {
     }
 }
 
+// 此函数将 goto 与标签进行匹配。
+//
+// 我们无法在解析函数时立即解析 goto，因为 goto
+// 可能引用函数中稍后出现的标签。
+// 因此，我们需要在解析整个函数之后再进行匹配。
+static void resolve_goto_labels(void) {
+    for (Node *x = gotos; x; x = x->goto_next) {
+        for (Node *y = labels; y; y = y->goto_next) {
+            if (!strcmp(x->label, y->label)) {
+                x->unique_label = y->unique_label;
+                break;
+            }
+        }
+
+        if (x->unique_label == NULL)
+            error_tok(x->tok->next, "use of undeclared label");
+    }
+
+    gotos = labels = NULL;
+}
+
 static Token *function(Token *tok, Type *basety, VarAttr *attr) {
     Type *ty = declarator(&tok, tok, basety);
 
@@ -1355,6 +1401,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
     fn->body = compound_stmt(&tok, tok);
     fn->locals = locals;
     leave_scope();
+    resolve_goto_labels();
     return tok;
 }
 
