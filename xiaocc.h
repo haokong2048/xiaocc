@@ -110,6 +110,7 @@ typedef enum {
     ND_LT,        // <
     ND_LE,        // <=
     ND_ASSIGN,    // =
+    ND_COND,      // ?:
     ND_COMMA,     // ,
     ND_MEMBER,    // . (结构体成员访问)
     ND_ADDR,      // 一元 &

@@ -208,6 +208,18 @@ static void gen_expr(Node *node) {
         gen_expr(node->lhs);
         gen_expr(node->rhs);
         return;
+    case ND_COND: {
+        int c = count();
+        gen_expr(node->cond);
+        println("    cmp x0, #0");
+        println("    b.eq .L.else.%d", c);
+        gen_expr(node->then);
+        println("    b .L.end.%d", c);
+        println(".L.else.%d:", c);
+        gen_expr(node->els);
+        println(".L.end.%d:", c);
+        return;
+    }
     case ND_NOT:
         gen_expr(node->lhs);
         println("    cmp x0, #0");
