@@ -243,6 +243,7 @@ struct Type {
 
     // 结构体
     Member *members;
+    bool is_flexible;
 
     // 函数类型
     Type *return_ty;
