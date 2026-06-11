@@ -711,6 +711,18 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
     }
 
     if (init->ty->kind == TY_STRUCT) {
+        // 结构体可以用另一个结构体初始化。例如
+        // `struct T x = y;` 其中 y 是 `struct T` 类型的变量。
+        // 先处理这种情况。
+        if (!equal(tok, "{")) {
+            Node *expr = assign(rest, tok);
+            add_type(expr);
+            if (expr->ty->kind == TY_STRUCT) {
+                init->expr = expr;
+                return;
+            }
+        }
+
         struct_initializer(rest, tok, init);
         return;
     }
@@ -751,7 +763,7 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token
         return node;
     }
 
-    if (ty->kind == TY_STRUCT) {
+    if (ty->kind == TY_STRUCT && !init->expr) {
         Node *node = new_node(ND_NULL_EXPR, tok);
 
         for (Member *mem = ty->members; mem; mem = mem->next) {
