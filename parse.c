@@ -242,8 +242,8 @@ static Initializer *new_initializer(Type *ty, bool is_flexible) {
         return init;
     }
 
-    if (ty->kind == TY_STRUCT) {
-        // 计算结构体成员数量
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        // 计算结构体/联合体成员数量
         int len = 0;
         for (Member *mem = ty->members; mem; mem = mem->next)
             len++;
@@ -678,6 +678,14 @@ static void array_initializer(Token **rest, Token *tok, Initializer *init) {
     }
 }
 
+static void union_initializer(Token **rest, Token *tok, Initializer *init) {
+    // 与结构体不同，联合体初始化器只接受一个初始化器，
+    // 且该初始化器初始化联合体的第一个成员。
+    tok = skip(tok, "{");
+    initializer2(&tok, tok, init->children[0]);
+    *rest = skip(tok, "}");
+}
+
 // struct-initializer = "{" initializer ("," initializer)* "}"
 static void struct_initializer(Token **rest, Token *tok, Initializer *init) {
     tok = skip(tok, "{");
@@ -698,7 +706,8 @@ static void struct_initializer(Token **rest, Token *tok, Initializer *init) {
 }
 
 // initializer = string-initializer | array-initializer
-//             | struct-initializer | assign
+//             | struct-initializer | union-initializer
+//             | assign
 static void initializer2(Token **rest, Token *tok, Initializer *init) {
     if (init->ty->kind == TY_ARRAY && tok->kind == TK_STR) {
         string_initializer(rest, tok, init);
@@ -724,6 +733,11 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
         }
 
         struct_initializer(rest, tok, init);
+        return;
+    }
+
+    if (init->ty->kind == TY_UNION) {
+        union_initializer(rest, tok, init);
         return;
     }
 
@@ -772,6 +786,11 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token
             node = new_binary(ND_COMMA, node, rhs, tok);
         }
         return node;
+    }
+
+    if (ty->kind == TY_UNION) {
+        InitDesg desg2 = {desg, 0, ty->members};
+        return create_lvar_init(init->children[0], ty->members->ty, &desg2, tok);
     }
 
     if (!init->expr)
