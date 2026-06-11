@@ -245,6 +245,7 @@ struct Member {
     Type *ty;
     Token *tok;   // 用于错误信息
     Token *name;
+    int idx;
     int offset;
 };
 
