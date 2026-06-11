@@ -119,6 +119,8 @@ typedef enum {
     ND_RETURN,    // "return"
     ND_IF,        // "if"
     ND_FOR,       // "for" or "while"
+    ND_SWITCH,    // "switch"
+    ND_CASE,      // "case"
     ND_BLOCK,     // { ... }
     ND_GOTO,      // "goto"
     ND_LABEL,     // 标签语句
@@ -166,8 +168,15 @@ struct Node {
     char *unique_label;
     Node *goto_next;
 
-    Obj *var;      // 如果类型是 ND_VAR，存储变量引用
-    int64_t val;   // 如果类型是 ND_NUM，存储其值
+    // switch-case
+    Node *case_next;
+    Node *default_case;
+
+    // 变量
+    Obj *var;
+
+    // 数字字面量
+    int64_t val;
 };
 
 Node *new_cast(Node *expr, Type *ty);
