@@ -146,6 +146,9 @@ struct Node {
     Node *init;
     Node *inc;
 
+    // "break" 标签
+    char *brk_label;
+
     // 块或语句表达式
     Node *body;
 

@@ -355,13 +355,13 @@ static void gen_stmt(Node *node) {
         if (node->cond) {
             gen_expr(node->cond);
             println("    cmp x0, #0");
-            println("    b.eq .L.end.%d", c);
+            println("    b.eq %s", node->brk_label);
         }
         gen_stmt(node->then);
         if (node->inc)
             gen_expr(node->inc);
         println("    b .L.begin.%d", c);
-        println(".L.end.%d:", c);
+        println("%s:", node->brk_label);
         return;
     }
     case ND_BLOCK:
