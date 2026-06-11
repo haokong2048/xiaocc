@@ -309,6 +309,12 @@ static void gen_expr(Node *node) {
     case ND_BITXOR:
         println("    eor %s, %s, %s", r0, r0, r1);
         return;
+    case ND_SHL:
+        println("    lsl %s, %s, %s", r0, r0, r1);
+        return;
+    case ND_SHR:
+        println("    asr %s, %s, %s", r0, r0, r1);
+        return;
     case ND_EQ:
     case ND_NE:
     case ND_LT:
