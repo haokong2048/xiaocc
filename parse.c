@@ -117,6 +117,8 @@ static Node *compound_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static int64_t eval(Node *node);
+static int64_t eval2(Node *node, char **label);
+static int64_t eval_rval(Node *node, char **label);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
 static Node *conditional(Token **rest, Token *tok);
@@ -837,22 +839,42 @@ static void write_buf(char *buf, uint64_t val, int sz) {
         unreachable();
 }
 
-static void write_gvar_data(Initializer *init, Type *ty, char *buf, int offset) {
+static Relocation *
+write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int offset) {
     if (ty->kind == TY_ARRAY) {
         int sz = ty->base->size;
         for (int i = 0; i < ty->array_len; i++)
-            write_gvar_data(init->children[i], ty->base, buf, offset + sz * i);
-        return;
+            cur = write_gvar_data(cur, init->children[i], ty->base, buf, offset + sz * i);
+        return cur;
     }
 
     if (ty->kind == TY_STRUCT) {
         for (Member *mem = ty->members; mem; mem = mem->next)
-            write_gvar_data(init->children[mem->idx], mem->ty, buf, offset + mem->offset);
-        return;
+            cur = write_gvar_data(cur, init->children[mem->idx], mem->ty, buf,
+                                  offset + mem->offset);
+        return cur;
     }
 
-    if (init->expr)
-        write_buf(buf + offset, eval(init->expr), ty->size);
+    if (ty->kind == TY_UNION)
+        return write_gvar_data(cur, init->children[0], ty->members->ty, buf, offset);
+
+    if (!init->expr)
+        return cur;
+
+    char *label = NULL;
+    uint64_t val = eval2(init->expr, &label);
+
+    if (!label) {
+        write_buf(buf + offset, val, ty->size);
+        return cur;
+    }
+
+    Relocation *rel = calloc(1, sizeof(Relocation));
+    rel->offset = offset;
+    rel->label = label;
+    rel->addend = val;
+    cur->next = rel;
+    return cur->next;
 }
 
 // 全局变量的初始化器在编译时求值并嵌入到 .data 段中。
@@ -861,9 +883,11 @@ static void write_gvar_data(Initializer *init, Type *ty, char *buf, int offset) 
 static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
     Initializer *init = initializer(rest, tok, var->ty, &var->ty);
 
+    Relocation head = {};
     char *buf = calloc(1, var->ty->size);
-    write_gvar_data(init, var->ty, buf, 0);
+    write_gvar_data(&head, init, var->ty, buf, 0);
     var->init_data = buf;
+    var->rel = head.next;
 }
 
 // 如果给定的 token 表示一个类型名则返回 true
@@ -1113,15 +1137,23 @@ static Node *expr(Token **rest, Token *tok) {
     return node;
 }
 
-// 将给定节点作为常量表达式求值
 static int64_t eval(Node *node) {
+    return eval2(node, NULL);
+}
+
+// 将给定节点作为常量表达式求值。
+//
+// 常量表达式可以是一个数字，或者 ptr+n 的形式，
+// 其中 ptr 是指向全局变量的指针，n 是正/负数。
+// 后一种形式仅作为全局变量的初始化表达式被接受。
+static int64_t eval2(Node *node, char **label) {
     add_type(node);
 
     switch (node->kind) {
     case ND_ADD:
-        return eval(node->lhs) + eval(node->rhs);
+        return eval2(node->lhs, label) + eval(node->rhs);
     case ND_SUB:
-        return eval(node->lhs) - eval(node->rhs);
+        return eval2(node->lhs, label) - eval(node->rhs);
     case ND_MUL:
         return eval(node->lhs) * eval(node->rhs);
     case ND_DIV:
@@ -1149,9 +1181,9 @@ static int64_t eval(Node *node) {
     case ND_LE:
         return eval(node->lhs) <= eval(node->rhs);
     case ND_COND:
-        return eval(node->cond) ? eval(node->then) : eval(node->els);
+        return eval(node->cond) ? eval2(node->then, label) : eval2(node->els, label);
     case ND_COMMA:
-        return eval(node->rhs);
+        return eval2(node->rhs, label);
     case ND_NOT:
         return !eval(node->lhs);
     case ND_BITNOT:
@@ -1160,20 +1192,53 @@ static int64_t eval(Node *node) {
         return eval(node->lhs) && eval(node->rhs);
     case ND_LOGOR:
         return eval(node->lhs) || eval(node->rhs);
-    case ND_CAST:
+    case ND_CAST: {
+        int64_t val = eval2(node->lhs, label);
         if (is_integer(node->ty)) {
             switch (node->ty->size) {
-            case 1: return (uint8_t)eval(node->lhs);
-            case 2: return (uint16_t)eval(node->lhs);
-            case 4: return (uint32_t)eval(node->lhs);
+            case 1: return (uint8_t)val;
+            case 2: return (uint16_t)val;
+            case 4: return (uint32_t)val;
             }
         }
-        return eval(node->lhs);
+        return val;
+    }
+    case ND_ADDR:
+        return eval_rval(node->lhs, label);
+    case ND_MEMBER:
+        if (!label)
+            error_tok(node->tok, "not a compile-time constant");
+        if (node->ty->kind != TY_ARRAY)
+            error_tok(node->tok, "invalid initializer");
+        return eval_rval(node->lhs, label) + node->member->offset;
+    case ND_VAR:
+        if (!label)
+            error_tok(node->tok, "not a compile-time constant");
+        if (node->var->ty->kind != TY_ARRAY && node->var->ty->kind != TY_FUNC)
+            error_tok(node->tok, "invalid initializer");
+        *label = node->var->name;
+        return 0;
     case ND_NUM:
         return node->val;
     }
 
     error_tok(node->tok, "not a compile-time constant");
+}
+
+static int64_t eval_rval(Node *node, char **label) {
+    switch (node->kind) {
+    case ND_VAR:
+        if (node->var->is_local)
+            error_tok(node->tok, "not a compile-time constant");
+        *label = node->var->name;
+        return 0;
+    case ND_DEREF:
+        return eval2(node->lhs, label);
+    case ND_MEMBER:
+        return eval_rval(node->lhs, label) + node->member->offset;
+    }
+
+    error_tok(node->tok, "invalid initializer");
 }
 
 static int64_t const_expr(Token **rest, Token *tok) {

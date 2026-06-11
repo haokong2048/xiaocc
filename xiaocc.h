@@ -19,6 +19,7 @@
 typedef struct Type Type;
 typedef struct Node Node;
 typedef struct Member Member;
+typedef struct Relocation Relocation;
 
 //
 // strings.c
@@ -87,12 +88,22 @@ struct Obj {
 
     // 全局变量
     char *init_data;
+    Relocation *rel;
 
     // 函数
     Obj *params;
     Node *body;
     Obj *locals;
     int stack_size;
+};
+
+// 全局变量可以通过常量表达式或指向其他全局变量的指针来初始化。
+// 此结构体表示后者。
+struct Relocation {
+    Relocation *next;
+    int offset;
+    char *label;
+    long addend;
 };
 
 // AST 节点
