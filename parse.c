@@ -52,6 +52,32 @@ typedef struct {
     bool is_static;
 } VarAttr;
 
+// 此结构体表示变量初始化器。由于初始化器可以嵌套
+//（例如 `int x[2][2] = {{1, 2}, {3, 4}}`），此结构体
+// 是一棵树形数据结构。
+typedef struct Initializer Initializer;
+struct Initializer {
+    Initializer *next;
+    Type *ty;
+    Token *tok;
+
+    // 如果不是聚合类型且有初始化器，
+    // `expr` 包含初始化表达式。
+    Node *expr;
+
+    // 如果是聚合类型（如数组或结构体）的初始化器，
+    // `children` 包含其子元素的初始化器。
+    Initializer **children;
+};
+
+// 用于局部变量初始化器
+typedef struct InitDesg InitDesg;
+struct InitDesg {
+    InitDesg *next;
+    int idx;
+    Obj *var;
+};
+
 // 解析过程中创建的所有局部变量实例
 // 都被累积到这个链表中
 static Obj *locals;
@@ -81,6 +107,7 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
 static Type *type_suffix(Token **rest, Token *tok, Type *ty);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
 static Node *declaration(Token **rest, Token *tok, Type *basety);
+static Node *lvar_initializer(Token **rest, Token *tok, Obj *var);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
@@ -193,6 +220,19 @@ static VarScope *push_scope(char *name) {
     sc->next = scope->vars;
     scope->vars = sc;
     return sc;
+}
+
+static Initializer *new_initializer(Type *ty) {
+    Initializer *init = calloc(1, sizeof(Initializer));
+    init->ty = ty;
+
+    if (ty->kind == TY_ARRAY) {
+        init->children = calloc(ty->array_len, sizeof(Initializer *));
+        for (int i = 0; i < ty->array_len; i++)
+            init->children[i] = new_initializer(ty->base);
+    }
+
+    return init;
 }
 
 static Obj *new_var(char *name, Type *ty) {
@@ -547,20 +587,79 @@ static Node *declaration(Token **rest, Token *tok, Type *basety) {
             error_tok(tok, "variable declared void");
 
         Obj *var = new_lvar(get_ident(ty->name), ty);
-
-        if (!equal(tok, "="))
-            continue;
-
-        Node *lhs = new_var_node(var, ty->name);
-        Node *rhs = assign(&tok, tok->next);
-        Node *node = new_binary(ND_ASSIGN, lhs, rhs, tok);
-        cur = cur->next = new_unary(ND_EXPR_STMT, node, tok);
+        if (equal(tok, "=")) {
+            Node *expr = lvar_initializer(&tok, tok->next, var);
+            cur = cur->next = new_unary(ND_EXPR_STMT, expr, tok);
+        }
     }
 
     Node *node = new_node(ND_BLOCK, tok);
     node->body = head.next;
     *rest = tok->next;
     return node;
+}
+
+// initializer = "{" initializer ("," initializer)* "}"
+//             | assign
+static void initializer2(Token **rest, Token *tok, Initializer *init) {
+    if (init->ty->kind == TY_ARRAY) {
+        tok = skip(tok, "{");
+
+        for (int i = 0; i < init->ty->array_len; i++) {
+            if (i > 0)
+                tok = skip(tok, ",");
+            initializer2(&tok, tok, init->children[i]);
+        }
+        *rest = skip(tok, "}");
+        return;
+    }
+
+    init->expr = assign(rest, tok);
+}
+
+static Initializer *initializer(Token **rest, Token *tok, Type *ty) {
+    Initializer *init = new_initializer(ty);
+    initializer2(rest, tok, init);
+    return init;
+}
+
+static Node *init_desg_expr(InitDesg *desg, Token *tok) {
+    if (desg->var)
+        return new_var_node(desg->var, tok);
+
+    Node *lhs = init_desg_expr(desg->next, tok);
+    Node *rhs = new_num(desg->idx, tok);
+    return new_unary(ND_DEREF, new_add(lhs, rhs, tok), tok);
+}
+
+static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token *tok) {
+    if (ty->kind == TY_ARRAY) {
+        Node *node = new_node(ND_NULL_EXPR, tok);
+        for (int i = 0; i < ty->array_len; i++) {
+            InitDesg desg2 = {desg, i};
+            Node *rhs = create_lvar_init(init->children[i], ty->base, &desg2, tok);
+            node = new_binary(ND_COMMA, node, rhs, tok);
+        }
+        return node;
+    }
+
+    Node *lhs = init_desg_expr(desg, tok);
+    Node *rhs = init->expr;
+    return new_binary(ND_ASSIGN, lhs, rhs, tok);
+}
+
+// 带初始化器的变量定义是变量定义后跟赋值操作的简写形式。
+// 此函数为初始化器生成赋值表达式。例如，
+// `int x[2][2] = {{6, 7}, {8, 9}}` 会被转换为以下表达式：
+//
+//   x[0][0] = 6;
+//   x[0][1] = 7;
+//   x[1][0] = 8;
+//   x[1][1] = 9;
+static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
+    Initializer *init = initializer(rest, tok, var->ty);
+    InitDesg desg = {NULL, 0, var};
+    return create_lvar_init(init, var->ty, &desg, tok);
 }
 
 // 如果给定的 token 表示一个类型名则返回 true

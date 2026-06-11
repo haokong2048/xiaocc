@@ -162,6 +162,8 @@ static void gen_expr(Node *node) {
     println("    .loc 1 %d", node->tok->line_no);
 
     switch (node->kind) {
+    case ND_NULL_EXPR:
+        return;
     case ND_NUM: {
         uint64_t val = (uint64_t)node->val;
         bool first = true;
