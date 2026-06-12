@@ -561,11 +561,16 @@ static Type *func_params(Token **rest, Token *tok, Type *ty) {
         Type *ty2 = declspec(&tok, tok, NULL);
         ty2 = declarator(&tok, tok, ty2);
 
+        Token *name = ty2->name;
+
         // 仅在参数上下文中，"array of T" 会被转换为 "pointer to T"。
         // 例如，*argv[] 会被转换为 **argv。
         if (ty2->kind == TY_ARRAY) {
-            Token *name = ty2->name;
             ty2 = pointer_to(ty2->base);
+            ty2->name = name;
+        } else if (ty2->kind == TY_FUNC) {
+            // 同样，函数在参数上下文中会被转换为指向函数的指针。
+            ty2 = pointer_to(ty2);
             ty2->name = name;
         }
 
