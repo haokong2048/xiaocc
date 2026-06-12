@@ -9,6 +9,9 @@ static File **input_files;
 // True if the current position is at the beginning of a line
 static bool at_bol;
 
+// True if the current position follows a space character
+static bool has_space;
+
 // Reports an error and exit.
 void error(char *fmt, ...) {
   va_list ap;
@@ -30,7 +33,7 @@ static void verror_at(char *filename, char *input, int line_no,
     line--;
 
   char *end = loc;
-  while (*end != '\n')
+  while (*end && *end != '\n')
     end++;
 
   // Print out the line.
@@ -101,7 +104,9 @@ static Token *new_token(TokenKind kind, char *start, char *end) {
   tok->len = end - start;
   tok->file = current_file;
   tok->at_bol = at_bol;
-  at_bol = false;
+  tok->has_space = has_space;
+
+  at_bol = has_space = false;
   return tok;
 }
 
@@ -132,7 +137,7 @@ static int read_punct(char *p) {
   static char *kw[] = {
     "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=",
     "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "&&",
-    "||", "<<", ">>",
+    "||", "<<", ">>", "##",
   };
 
   for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -386,7 +391,7 @@ static void add_line_numbers(Token *tok) {
 }
 
 // Tokenize a given string and returns new tokens.
-static Token *tokenize(File *file) {
+Token *tokenize(File *file) {
   current_file = file;
 
   char *p = file->contents;
@@ -394,6 +399,7 @@ static Token *tokenize(File *file) {
   Token *cur = &head;
 
   at_bol = true;
+  has_space = false;
 
   while (*p) {
     // Skip line comments.
@@ -401,6 +407,7 @@ static Token *tokenize(File *file) {
       p += 2;
       while (*p != '\n')
         p++;
+      has_space = true;
       continue;
     }
 
@@ -410,6 +417,7 @@ static Token *tokenize(File *file) {
       if (!q)
         error_at(p, "unclosed block comment");
       p = q + 2;
+      has_space = true;
       continue;
     }
 
@@ -417,12 +425,14 @@ static Token *tokenize(File *file) {
     if (*p == '\n') {
       p++;
       at_bol = true;
+      has_space = false;
       continue;
     }
 
     // Skip whitespace characters.
     if (isspace(*p)) {
       p++;
+      has_space = true;
       continue;
     }
 
@@ -515,7 +525,7 @@ File **get_input_files(void) {
   return input_files;
 }
 
-static File *new_file(char *name, int file_no, char *contents) {
+File *new_file(char *name, int file_no, char *contents) {
   File *file = calloc(1, sizeof(File));
   file->name = name;
   file->file_no = file_no;
