@@ -47,6 +47,7 @@ struct Token {
     TokenKind kind; // Token 类型
     Token *next;    // 下一个 Token
     int64_t val;    // 如果类型是 TK_NUM，存储其值
+    double fval;    // 如果类型是 TK_NUM 且为浮点数
     char *loc;      // Token 位置
     int len;        // Token 长度
     Type *ty;       // 如果类型是 TK_NUM 或 TK_STR 则使用
@@ -200,6 +201,7 @@ struct Node {
 
     // 数字字面量
     int64_t val;
+    double fval;
 };
 
 Node *new_cast(Node *expr, Type *ty);
@@ -216,6 +218,8 @@ typedef enum {
     TY_SHORT,
     TY_INT,
     TY_LONG,
+    TY_FLOAT,
+    TY_DOUBLE,
     TY_ENUM,
     TY_PTR,
     TY_FUNC,
@@ -282,7 +286,11 @@ extern Type *ty_ushort;
 extern Type *ty_uint;
 extern Type *ty_ulong;
 
+extern Type *ty_float;
+extern Type *ty_double;
+
 bool is_integer(Type *ty);
+bool is_flonum(Type *ty);
 Type *copy_type(Type *ty);
 Type *pointer_to(Type *base);
 Type *func_type(Type *return_ty);

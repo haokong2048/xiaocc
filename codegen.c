@@ -207,6 +207,29 @@ static void gen_expr(Node *node) {
     case ND_NULL_EXPR:
         return;
     case ND_NUM: {
+        // 浮点常量
+        if (is_flonum(node->ty)) {
+            union { float f32; double f64; uint32_t u32; uint64_t u64; } u;
+            if (node->ty->kind == TY_FLOAT) {
+                u.f32 = (float)node->fval;
+                println("    movz w0, #%d", u.u32 & 0xFFFF);
+                if (u.u32 >> 16)
+                    println("    movk w0, #%d, lsl #16", (u.u32 >> 16) & 0xFFFF);
+                println("    fmov s0, w0");
+            } else {
+                u.f64 = node->fval;
+                println("    movz x0, #%d", (int)(u.u64 & 0xFFFF));
+                if (u.u64 >> 16)
+                    println("    movk x0, #%d, lsl #16", (int)((u.u64 >> 16) & 0xFFFF));
+                if (u.u64 >> 32)
+                    println("    movk x0, #%d, lsl #32", (int)((u.u64 >> 32) & 0xFFFF));
+                if (u.u64 >> 48)
+                    println("    movk x0, #%d, lsl #48", (int)((u.u64 >> 48) & 0xFFFF));
+                println("    fmov d0, x0");
+            }
+            return;
+        }
+
         uint64_t val = (uint64_t)node->val;
         bool first = true;
         for (int shift = 0; shift < 64; shift += 16) {

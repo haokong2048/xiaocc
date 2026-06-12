@@ -286,8 +286,8 @@ static Token *read_int_literal(char *start) {
         u = true;
     }
 
-    if (isalnum(*p))
-        error_at(p, "无效的数字");
+    // 有效性检查由 read_number 处理
+    // (移除旧的 isalnum 检查)
 
     // 推断类型
     Type *ty;
@@ -319,6 +319,33 @@ static Token *read_int_literal(char *start) {
 
     Token *tok = new_token(TK_NUM, start, p);
     tok->val = val;
+    tok->ty = ty;
+    return tok;
+}
+
+static Token *read_number(char *start) {
+    // 尝试解析为整数常量
+    Token *tok = read_int_literal(start);
+    if (!strchr(".eEfF", start[tok->len]))
+        return tok;
+
+    // 如果不是整数，则必须是浮点常量
+    char *end;
+    double val = strtod(start, &end);
+
+    Type *ty;
+    if (*end == 'f' || *end == 'F') {
+        ty = ty_float;
+        end++;
+    } else if (*end == 'l' || *end == 'L') {
+        ty = ty_double;
+        end++;
+    } else {
+        ty = ty_double;
+    }
+
+    tok = new_token(TK_NUM, start, end);
+    tok->fval = val;
     tok->ty = ty;
     return tok;
 }
@@ -376,8 +403,8 @@ static Token *tokenize(char *filename, char *p) {
         }
 
         // 数字字面量
-        if (isdigit(*p)) {
-            cur = cur->next = read_int_literal(p);
+        if (isdigit(*p) || (*p == '.' && isdigit(p[1]))) {
+            cur = cur->next = read_number(p);
             p += cur->len;
             continue;
         }
