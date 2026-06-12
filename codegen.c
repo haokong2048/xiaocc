@@ -514,6 +514,15 @@ static void emit_data(Obj *prog) {
 }
 
 static void store_gp(int r, int offset, int sz) {
+    if (offset < -256 || offset > 255) {
+        println("    add x8, x29, #%d", offset);
+        switch (sz) {
+        case 1: println("    strb w%d, [x8]", r); return;
+        case 2: println("    strh w%d, [x8]", r); return;
+        case 4: println("    str w%d, [x8]", r); return;
+        case 8: println("    str x%d, [x8]", r); return;
+        }
+    }
     switch (sz) {
     case 1:
         println("    strb w%d, [x29, #%d]", r, offset);
@@ -549,6 +558,57 @@ static void emit_text(Obj *prog) {
         println("    stp x29, x30, [sp, #-16]!");
         println("    mov x29, sp");
         println("    sub sp, sp, #%d", fn->stack_size);
+
+        // 为可变参数函数保存寄存器 (ARM64 AAPCS64 布局)
+        if (fn->va_area) {
+            int gp = 0;
+            for (Obj *var = fn->params; var; var = var->next)
+                gp++;
+            int off = fn->va_area->offset;
+
+            // 使用 x8 作为基地址
+            println("    add x8, x29, #%d", off);
+
+            // ARM64 va_area 布局:
+            //   +0:   va_elem (32 bytes)
+            //   +32:  FP save area (128 bytes, q0-q7 每个 16 bytes)
+            //   +160: GP save area (48 bytes, x2-x7 每个 8 bytes)
+            //   +208: end
+            // 总共: 208 bytes (va_area 分配了 224)
+
+            // 保存 GP 寄存器 x2-x7 到 GP save area (偏移 160)
+            // x0-x1 是命名参数, 不保存在 variadic save area 中
+            println("    str x2, [x8, #160]");
+            println("    str x3, [x8, #168]");
+            println("    str x4, [x8, #176]");
+            println("    str x5, [x8, #184]");
+            println("    str x6, [x8, #192]");
+            println("    str x7, [x8, #200]");
+
+            // 设置 va_elem 元数据 (匹配 ARM64 glibc 布局)
+            // __gr_offs (偏移 24): = -(8-num_params)*8
+            int gr_offs = -64 + gp * 8;
+            println("    mov w0, #%d", gr_offs);
+            println("    str w0, [x8, #24]");
+
+            // __vr_offs (偏移 28): = -(FP save area 与 GP save area 的距离)
+            // FP area 在 offset 32, GP area 在 offset 160
+            // __vr_offs = 32 - 160 = -128
+            println("    mov w0, #-128");
+            println("    str w0, [x8, #28]");
+
+            // __stack (偏移 0): overflow_arg_area 指针
+            println("    add x0, x8, #208");
+            println("    str x0, [x8, #0]");
+
+            // __gr_top (偏移 8): 指向 GP save area 末尾之后 (offset 160+48=208)
+            println("    add x0, x8, #208");
+            println("    str x0, [x8, #8]");
+
+            // __vr_top (偏移 16): 指向 GP save area 开头 (offset 160)
+            println("    add x0, x8, #160");
+            println("    str x0, [x8, #16]");
+        }
 
         // 将寄存器传入的参数保存到栈中
         int i = 0;
