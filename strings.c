@@ -13,3 +13,15 @@ char *format(char *fmt, ...) {
     fclose(out);
     return buf;
 }
+
+void strarray_push(StringArray *arr, char *s) {
+    if (!arr->data) {
+        arr->data = calloc(8, sizeof(char *));
+        arr->cap = 8;
+    }
+    if (arr->len == arr->cap) {
+        arr->cap *= 2;
+        arr->data = realloc(arr->data, arr->cap * sizeof(char *));
+    }
+    arr->data[arr->len++] = s;
+}

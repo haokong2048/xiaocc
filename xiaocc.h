@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <libgen.h>
 
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
@@ -21,6 +22,12 @@ typedef struct Node Node;
 typedef struct Member Member;
 typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
+
+typedef struct {
+    char **data;
+    int len;
+    int cap;
+} StringArray;
 
 //
 // strings.c
@@ -65,6 +72,7 @@ struct Token {
     bool at_bol;      // 此 token 是否在行首
     bool has_space;   // 此 token 前是否有空白字符
     Hideset *hideset; // 用于宏展开
+    Token *origin;    // 如果来自宏展开，指向原始 token
 };
 
 void error(char *fmt, ...);
@@ -328,5 +336,14 @@ void add_type(Node *node);
 
 void codegen(Obj *prog, FILE *out);
 int align_to(int n, int align);
+
+//
+// main.c
+//
+
+bool file_exists(char *path);
+void strarray_push(StringArray *arr, char *s);
+
+extern StringArray include_paths;
 
 #endif

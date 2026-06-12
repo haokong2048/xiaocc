@@ -2371,6 +2371,15 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
         fn->va_area = new_lvar("__va_area__", array_of(ty_char, 224));
 
     tok = skip(tok, "{");
+
+    // [N1570 6.4.2.2p1] "__func__" 被自动定义为包含当前函数名的局部变量
+    push_scope("__func__")->var =
+        new_string_literal(fn->name, array_of(ty_char, strlen(fn->name) + 1));
+
+    // [GNU] __FUNCTION__ 是 __func__ 的别名
+    push_scope("__FUNCTION__")->var =
+        new_string_literal(fn->name, array_of(ty_char, strlen(fn->name) + 1));
+
     fn->body = compound_stmt(&tok, tok);
     fn->locals = locals;
     leave_scope();

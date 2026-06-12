@@ -910,6 +910,12 @@ static void emit_text(Obj *prog) {
 void codegen(Obj *prog, FILE *out) {
     output_file = out;
 
+    // 为汇编器输出 .file 指令
+    File **files = get_input_files();
+    for (int i = 0; files[i]; i++)
+        if (files[i]->file_no > 0)
+            println("    .file %d \"%s\"", files[i]->file_no, files[i]->name);
+
     assign_lvar_offsets(prog);
     emit_data(prog);
     emit_text(prog);

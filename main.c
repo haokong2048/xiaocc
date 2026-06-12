@@ -1,4 +1,7 @@
 #include "xiaocc.h"
+#include <sys/stat.h>
+
+StringArray include_paths;
 
 static char *opt_o;
 
@@ -46,8 +49,19 @@ static FILE *open_file(char *path) {
     return out;
 }
 
+bool file_exists(char *path) {
+    struct stat st;
+    return !stat(path, &st);
+}
+
 int main(int argc, char **argv) {
     parse_args(argc, argv);
+
+    // 添加默认 include 路径 (ARM64)
+    strarray_push(&include_paths, ".");
+    strarray_push(&include_paths, "/usr/local/include");
+    strarray_push(&include_paths, "/usr/aarch64-linux-gnu/include");
+    strarray_push(&include_paths, "/usr/include");
 
     // 词法分析 + 语法分析
     Token *tok = tokenize_file(input_path);
@@ -58,7 +72,6 @@ int main(int argc, char **argv) {
 
     // 遍历 AST 生成汇编
     FILE *out = open_file(opt_o);
-    fprintf(out, ".file 1 \"%s\"\n", input_path);
     codegen(prog, out);
     return 0;
 }
