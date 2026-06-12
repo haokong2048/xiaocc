@@ -51,6 +51,7 @@ int main(int argc, char **argv) {
 
     // 词法分析 + 语法分析
     Token *tok = tokenize_file(input_path);
+    tok = preprocess(tok);
     Obj *prog = parse(tok);
 
     // 遍历 AST 生成汇编

@@ -365,7 +365,7 @@ static void add_line_numbers(Token *tok) {
     } while (*p++);
 }
 
-static void convert_keywords(Token *tok) {
+void convert_keywords(Token *tok) {
     for (Token *t = tok; t->kind != TK_EOF; t = t->next)
         if (is_keyword(t))
             t->kind = TK_KEYWORD;
@@ -446,7 +446,6 @@ static Token *tokenize(char *filename, char *p) {
 
     cur = cur->next = new_token(TK_EOF, p, p);
     add_line_numbers(head.next);
-    convert_keywords(head.next);
     return head.next;
 }
 
