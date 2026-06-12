@@ -54,6 +54,7 @@ struct Token {
     char *str;      // 字符串字面量内容（含结尾 '\0'）
 
     int line_no;    // 行号
+    bool at_bol;    // 此 token 是否在行首
 };
 
 void error(char *fmt, ...);

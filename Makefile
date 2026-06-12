@@ -15,13 +15,17 @@ xiaocc: $(OBJS)
 
 $(OBJS): xiaocc.h
 
+test/macro.exe: xiaocc test/macro.c
+	$(QEMU) ./xiaocc -o test/macro.s test/macro.c
+	$(CC) -static -o $@ test/macro.s -xc test/common
+
 test/%.exe: xiaocc test/%.c
 	$(CC) -o- -E -P -C test/$*.c | $(QEMU) ./xiaocc -o test/$*.s -
 	$(CC) -static -o $@ test/$*.s -xc test/common
 
 test: $(TESTS)
 	for i in $^; do echo $$i; $(QEMU) ./$$i || exit 1; echo; done
-	test/driver.sh
+	test/driver.sh || exit 1
 
 clean:
 	rm -f xiaocc tmp* $(TESTS) test/*.s test/*.exe

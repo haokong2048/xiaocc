@@ -6,6 +6,9 @@ static char *current_filename;
 // 当前输入字符串
 static char *current_input;
 
+// 当前位置是否在行首
+static bool at_bol;
+
 // 报告错误并退出
 void error(char *fmt, ...) {
     va_list ap;
@@ -88,6 +91,8 @@ static Token *new_token(TokenKind kind, char *start, char *end) {
     tok->kind = kind;
     tok->loc = start;
     tok->len = end - start;
+    tok->at_bol = at_bol;
+    at_bol = false;
     return tok;
 }
 
@@ -375,10 +380,18 @@ void convert_keywords(Token *tok) {
 static Token *tokenize(char *filename, char *p) {
     current_filename = filename;
     current_input = p;
+    at_bol = true;
     Token head = {};
     Token *cur = &head;
 
     while (*p) {
+        // 跳过新行
+        if (*p == '\n') {
+            p++;
+            at_bol = true;
+            continue;
+        }
+
         // 跳过行注释
         if (startswith(p, "//")) {
             p += 2;
