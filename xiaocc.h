@@ -49,7 +49,7 @@ struct Token {
     int64_t val;    // 如果类型是 TK_NUM，存储其值
     char *loc;      // Token 位置
     int len;        // Token 长度
-    Type *ty;       // 如果类型是 TK_STR 则使用
+    Type *ty;       // 如果类型是 TK_NUM 或 TK_STR 则使用
     char *str;      // 字符串字面量内容（含结尾 '\0'）
 
     int line_no;    // 行号
