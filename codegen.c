@@ -49,6 +49,7 @@ static void load(Type *ty) {
     case TY_ARRAY:
     case TY_STRUCT:
     case TY_UNION:
+    case TY_FUNC:
         return;
     case TY_FLOAT:
         println("    ldr s0, [x0]");
@@ -141,11 +142,21 @@ static void gen_addr(Node *node) {
         if (node->var->is_local) {
             // 局部变量
             compute_fp_offset(node->var->offset, "x0");
-        } else {
-            // 全局变量
-            println("    adrp x0, %s", node->var->name);
-            println("    add x0, x0, :lo12:%s", node->var->name);
+            return;
         }
+
+        // 函数
+        if (node->var->ty->kind == TY_FUNC) {
+            if (node->var->is_definition)
+                println("    adr x0, %s", node->var->name);
+            else
+                println("    adrp x0, %s\n    add x0, x0, :lo12:%s", node->var->name, node->var->name);
+            return;
+        }
+
+        // 全局变量
+        println("    adrp x0, %s", node->var->name);
+        println("    add x0, x0, :lo12:%s", node->var->name);
         return;
     case ND_DEREF:
         gen_expr(node->lhs);
@@ -432,6 +443,8 @@ static void gen_expr(Node *node) {
     }
     case ND_FUNCALL: {
         push_args(node->args);
+        gen_expr(node->lhs);
+        println("    mov x8, x0");
 
         int gp = 0, fp = 0;
         for (Node *arg = node->args; arg; arg = arg->next) {
@@ -441,7 +454,7 @@ static void gen_expr(Node *node) {
                 pop(argreg64[gp++]);
         }
 
-        println("    bl %s", node->funcname);
+        println("    blr x8");
 
         // 清除返回值寄存器的高位
         switch (node->ty->kind) {

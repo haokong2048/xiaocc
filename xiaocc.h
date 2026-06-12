@@ -183,7 +183,6 @@ struct Node {
     Member *member;
 
     // 函数调用
-    char *funcname;
     Type *func_ty;
     Node *args;
 
