@@ -1,7 +1,8 @@
 #!/bin/bash
-tmp=`mktemp -d /tmp/xiaocc-test-XXXXXX`
+chibicc=$1
+
+tmp=`mktemp -d /tmp/chibicc-test-XXXXXX`
 trap 'rm -rf $tmp' INT TERM HUP EXIT
-echo > $tmp/empty.c
 
 check() {
     if [ $? -eq 0 ]; then
@@ -12,16 +13,14 @@ check() {
     fi
 }
 
-QEMU=qemu-aarch64
-
 # -o
-rm -f $tmp/out
-"$QEMU" ./xiaocc -o $tmp/out $tmp/empty.c
+echo > $tmp/empty.c
+$chibicc -o $tmp/out $tmp/empty.c 2>/dev/null
 [ -f $tmp/out ]
 check -o
 
 # --help
-"$QEMU" ./xiaocc --help 2>&1 | grep -q xiaocc
+$chibicc --help 2>&1 | grep -q xiaocc
 check --help
 
 echo OK

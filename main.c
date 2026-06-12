@@ -64,6 +64,9 @@ int main(int argc, char **argv) {
     strarray_push(&include_paths, "/usr/aarch64-linux-gnu/include");
     strarray_push(&include_paths, "/usr/include");
 
+    // 初始化预定义宏
+    init_macros();
+
     // 词法分析 + 语法分析
     Token *tok = tokenize_file(input_path);
     if (!tok)

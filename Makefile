@@ -23,9 +23,6 @@ test/stdhdr.exe: xiaocc test/stdhdr.c
 	$(QEMU) ./xiaocc -o test/stdhdr.s test/stdhdr.c
 	$(CC) -static -o $@ test/stdhdr.s -xc test/common
 
-test/varargs.exe: xiaocc test/varargs.c
-	$(QEMU) ./xiaocc -o test/varargs.s test/varargs.c
-	$(CC) -static -o $@ test/varargs.s -xc test/common
 
 test/%.exe: xiaocc test/%.c
 	$(CC) -o- -E -P -C test/$*.c | $(QEMU) ./xiaocc -o test/$*.s -
@@ -33,7 +30,7 @@ test/%.exe: xiaocc test/%.c
 
 test: $(TESTS)
 	for i in $^; do echo $$i; $(QEMU) ./$$i || exit 1; echo; done
-	test/driver.sh || exit 1
+	test/driver.sh $(QEMU) ./xiaocc || exit 1
 
 clean:
 	rm -f xiaocc tmp* $(TESTS) test/*.s test/*.exe

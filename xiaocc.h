@@ -46,6 +46,7 @@ typedef enum {
     TK_KEYWORD, // 关键字
     TK_STR,     // 字符串字面量
     TK_NUM,     // 数字字面量
+    TK_PP_NUM,  // 预处理数字 token
     TK_EOF,     // 文件结束标记
 } TokenKind;
 
@@ -82,7 +83,7 @@ void warn_tok(Token *tok, char *fmt, ...);
 bool equal(Token *tok, char *op);
 Token *skip(Token *tok, char *op);
 bool consume(Token **rest, Token *tok, char *str);
-void convert_keywords(Token *tok);
+void convert_pp_tokens(Token *tok);
 File **get_input_files(void);
 File *new_file(char *name, int file_no, char *contents);
 Token *tokenize(File *file);
@@ -95,6 +96,9 @@ Token *tokenize_file(char *filename);
 // preprocess.c
 //
 
+void init_macros(void);
+void define_macro(char *name, char *buf);
+void undef_macro(char *name);
 Token *preprocess(Token *tok);
 
 //
@@ -215,6 +219,8 @@ struct Node {
     // 函数调用
     Type *func_ty;
     Node *args;
+    bool pass_by_stack;
+    Obj *ret_buffer;
 
     // goto 或标签语句
     char *label;

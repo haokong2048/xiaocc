@@ -1929,8 +1929,15 @@ static Node *unary(Token **rest, Token *tok) {
     if (equal(tok, "&"))
         return new_unary(ND_ADDR, cast(rest, tok->next), tok);
 
-    if (equal(tok, "*"))
-        return new_unary(ND_DEREF, cast(rest, tok->next), tok);
+    if (equal(tok, "*")) {
+        // [N1570 6.5.3.2p4] 对函数类型解引用不应产生任何效果。
+        // 如果 foo 是函数，那么 *foo、**foo 或 *****foo 都等同于 foo。
+        Node *node = cast(rest, tok->next);
+        add_type(node);
+        if (node->ty->kind == TY_FUNC)
+            return node;
+        return new_unary(ND_DEREF, node, tok);
+    }
 
     if (equal(tok, "!"))
         return new_unary(ND_NOT, cast(rest, tok->next), tok);
