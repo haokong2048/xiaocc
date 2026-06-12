@@ -2139,6 +2139,9 @@ static Node *funcall(Token **rest, Token *tok) {
                 error_tok(arg->tok, "passing struct or union is not supported yet");
             arg = new_cast(arg, param_ty);
             param_ty = param_ty->next;
+        } else if (arg->ty->kind == TY_FLOAT) {
+            // 如果参数类型被省略（如 "..."），float 参数被提升为 double
+            arg = new_cast(arg, ty_double);
         }
 
         cur = cur->next = arg;
