@@ -317,6 +317,14 @@ static void gen_expr(Node *node) {
     }
     case ND_NEG:
         gen_expr(node->lhs);
+        switch (node->ty->kind) {
+        case TY_FLOAT:
+            println("    fneg s0, s0");
+            return;
+        case TY_DOUBLE:
+            println("    fneg d0, d0");
+            return;
+        }
         println("    neg x0, x0");
         return;
     case ND_VAR:
@@ -452,6 +460,30 @@ static void gen_expr(Node *node) {
         popf("d1");
 
         switch (node->kind) {
+        case ND_ADD:
+            if (node->lhs->ty->kind == TY_FLOAT)
+                println("    fadd s0, s0, s1");
+            else
+                println("    fadd d0, d0, d1");
+            return;
+        case ND_SUB:
+            if (node->lhs->ty->kind == TY_FLOAT)
+                println("    fsub s0, s0, s1");
+            else
+                println("    fsub d0, d0, d1");
+            return;
+        case ND_MUL:
+            if (node->lhs->ty->kind == TY_FLOAT)
+                println("    fmul s0, s0, s1");
+            else
+                println("    fmul d0, d0, d1");
+            return;
+        case ND_DIV:
+            if (node->lhs->ty->kind == TY_FLOAT)
+                println("    fdiv s0, s0, s1");
+            else
+                println("    fdiv d0, d0, d1");
+            return;
         case ND_EQ:
         case ND_NE:
         case ND_LT:

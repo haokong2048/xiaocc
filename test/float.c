@@ -37,7 +37,7 @@ int main() {
   ASSERT(35, (unsigned int)(double)35);
   ASSERT(35, (unsigned long)(double)35);
 
-  // ARM64: u64→f64 溢出行为不同, 跳过此断言
+  // ARM64: fcvtzs 溢出行为与 x86 不同, 跳过此断言
   // ASSERT(-2147483648, (double)(unsigned long)(long)-1);
 
   ASSERT(1, 2e3==2e3);
@@ -59,6 +59,27 @@ int main() {
   ASSERT(0, 5.1f<=5);
   ASSERT(1, 5.0f<=5);
   ASSERT(1, 4.9f<=5);
+
+  ASSERT(6, 2.3+3.8);
+  ASSERT(-1, 2.3-3.8);
+  ASSERT(-3, -3.8);
+  ASSERT(13, 3.3*4);
+  ASSERT(2, 5.0/2);
+
+  ASSERT(6, 2.3f+3.8f);
+  ASSERT(6, 2.3f+3.8);
+  ASSERT(-1, 2.3f-3.8);
+  ASSERT(-3, -3.8f);
+  ASSERT(13, 3.3f*4);
+  ASSERT(2, 5.0f/2);
+
+  ASSERT(0, 0.0/0.0 == 0.0/0.0);
+  ASSERT(1, 0.0/0.0 != 0.0/0.0);
+
+  ASSERT(0, 0.0/0.0 < 0);
+  ASSERT(0, 0.0/0.0 <= 0);
+  ASSERT(0, 0.0/0.0 > 0);
+  ASSERT(0, 0.0/0.0 >= 0);
 
   printf("OK\n");
   return 0;
