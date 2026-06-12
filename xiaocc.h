@@ -77,6 +77,7 @@ struct Obj {
     char *name;    // 变量名
     Type *ty;      // 类型
     bool is_local; // 局部变量还是全局变量/函数
+    int align;     // 对齐
 
     // 局部变量
     int offset; // 相对于帧指针的偏移量
@@ -258,6 +259,7 @@ struct Member {
     Token *tok;   // 用于错误信息
     Token *name;
     int idx;
+    int align;
     int offset;
 };
 
