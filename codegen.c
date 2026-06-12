@@ -813,9 +813,13 @@ static void emit_text(Obj *prog) {
 
         // 为可变参数函数保存寄存器 (ARM64 AAPCS64 布局)
         if (fn->va_area) {
-            int gp = 0;
-            for (Obj *var = fn->params; var; var = var->next)
-                gp++;
+            int gp = 0, fp = 0;
+            for (Obj *var = fn->params; var; var = var->next) {
+                if (is_flonum(var->ty))
+                    fp++;
+                else
+                    gp++;
+            }
             int off = fn->va_area->offset;
 
             // 使用 x8 作为基地址
