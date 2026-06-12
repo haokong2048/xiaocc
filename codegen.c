@@ -35,8 +35,18 @@ static void pop(char *arg) {
 // 如果是数组类型则不加载，因为无法将整个数组加载到寄存器中。
 // 这也就是 C 语言中"数组会自动转换为指向首元素的指针"发生的地方。
 static void load(Type *ty) {
-    if (ty->kind == TY_ARRAY || ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+    switch (ty->kind) {
+    case TY_ARRAY:
+    case TY_STRUCT:
+    case TY_UNION:
         return;
+    case TY_FLOAT:
+        println("    ldr s0, [x0]");
+        return;
+    case TY_DOUBLE:
+        println("    ldr d0, [x0]");
+        return;
+    }
 
     if (ty->size == 1) {
         if (ty->is_unsigned)
@@ -62,11 +72,19 @@ static void load(Type *ty) {
 static void store(Type *ty) {
     pop("x1");
 
-    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+    switch (ty->kind) {
+    case TY_STRUCT:
+    case TY_UNION:
         for (int i = 0; i < ty->size; i++) {
             println("    ldrb w2, [x0, #%d]", i);
             println("    strb w2, [x1, #%d]", i);
         }
+        return;
+    case TY_FLOAT:
+        println("    str s0, [x1]");
+        return;
+    case TY_DOUBLE:
+        println("    str d0, [x1]");
         return;
     }
 
@@ -135,7 +153,7 @@ static void gen_addr(Node *node) {
     error_tok(node->tok, "not an lvalue");
 }
 
-enum { I8, I16, I32, I64, U8, U16, U32, U64 };
+enum { I8, I16, I32, I64, U8, U16, U32, U64, F32, F64 };
 
 static int getTypeId(Type *ty) {
     switch (ty->kind) {
@@ -148,39 +166,81 @@ static int getTypeId(Type *ty) {
         return ty->is_unsigned ? U32 : I32;
     case TY_LONG:
         return ty->is_unsigned ? U64 : I64;
+    case TY_FLOAT:
+        return F32;
+    case TY_DOUBLE:
+        return F64;
     }
     return U64;
 }
 
-// ARM64 类型转换：使用符号/零扩展指令
-// sxtb: 符号扩展 8→32, uxtb: 零扩展 8→32
-// sxth: 符号扩展 16→32, uxth: 零扩展 16→32
-// sxtw: 符号扩展 32→64
-// mov w0, w0: 零扩展 32→64
+// ARM64 类型转换：使用符号/零扩展和浮点转换指令
+// sxtb: 8→32 符号扩展, uxtb: 8→32 零扩展
+// sxth: 16→32 符号扩展, uxth: 16→32 零扩展
+// sxtw: 32→64 符号扩展
+// scvtf: 整数→浮点, fcvtzs: 浮点→有符号整数, fcvtzu: 浮点→无符号整数
+// fcvt: 浮点间转换
 static char i32i8[]  = "sxtb w0, w0";
 static char i32u8[]  = "uxtb w0, w0";
 static char i32i16[] = "sxth w0, w0";
 static char i32u16[] = "uxth w0, w0";
+static char i32f32[] = "scvtf s0, w0";
 static char i64i32[] = "sxtw x0, w0";
+static char i32f64[] = "scvtf d0, w0";
 static char u64i32[] = "mov w0, w0";
+static char u32f32[] = "ucvtf s0, w0";
+static char u32f64[] = "ucvtf d0, w0";
+static char i64f32[] = "scvtf s0, x0";
+static char i64f64[] = "scvtf d0, x0";
+static char u64f32[] = "ucvtf s0, x0";
+static char u64f64[] = "ucvtf d0, x0";
 
-static char *cast_table[][10] = {
-    // i8   i16     i32   i64     u8     u16     u32   u64
-    {NULL,  NULL,   NULL, NULL,   i32u8, i32u16, NULL, NULL},   // i8
-    {i32i8, NULL,   NULL, NULL,   i32u8, i32u16, NULL, NULL},   // i16
-    {i32i8, i32i16, NULL, i64i32, i32u8, i32u16, NULL, i64i32}, // i32
-    {i32i8, i32i16, NULL, NULL,   i32u8, i32u16, NULL, NULL},   // i64
-    {i32i8, NULL,   NULL, NULL,   NULL,  NULL,   NULL, NULL},   // u8
-    {i32i8, i32i16, NULL, NULL,   i32u8, NULL,   NULL, NULL},   // u16
-    {i32i8, i32i16, NULL, u64i32, i32u8, i32u16, NULL, u64i32}, // u32
-    {i32i8, i32i16, NULL, NULL,   i32u8, i32u16, NULL, NULL},   // u64
+static char f32i8[]  = "fcvtzs w0, s0; sxtb w0, w0";
+static char f32u8[]  = "fcvtzu w0, s0; uxtb w0, w0";
+static char f32i16[] = "fcvtzs w0, s0; sxth w0, w0";
+static char f32u16[] = "fcvtzu w0, s0; uxth w0, w0";
+static char f32i32[] = "fcvtzs w0, s0";
+static char f32u32[] = "fcvtzu w0, s0";
+static char f32i64[] = "fcvtzs x0, s0";
+static char f32u64[] = "fcvtzu x0, s0";
+static char f32f64[] = "fcvt d0, s0";
+
+static char f64i8[]  = "fcvtzs w0, d0; sxtb w0, w0";
+static char f64u8[]  = "fcvtzu w0, d0; uxtb w0, w0";
+static char f64i16[] = "fcvtzs w0, d0; sxth w0, w0";
+static char f64u16[] = "fcvtzu w0, d0; uxth w0, w0";
+static char f64i32[] = "fcvtzs w0, d0";
+static char f64u32[] = "fcvtzu w0, d0";
+static char f64f32[] = "fcvt s0, d0";
+static char f64i64[] = "fcvtzs x0, d0";
+static char f64u64[] = "fcvtzu x0, d0";
+
+static char *cast_table[][12] = {
+    // i8   i16     i32     i64     u8     u16     u32     u64     f32     f64
+    {NULL,  NULL,   NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   i32f32, i32f64}, // i8
+    {i32i8, NULL,   NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   i32f32, i32f64}, // i16
+    {i32i8, i32i16, NULL,   i64i32, i32u8, i32u16, NULL,   i64i32, i32f32, i32f64}, // i32
+    {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   i64f32, i64f64}, // i64
+    {i32i8, NULL,   NULL,   NULL,   NULL,  NULL,   NULL,   NULL,   i32f32, i32f64}, // u8
+    {i32i8, i32i16, NULL,   NULL,   i32u8, NULL,   NULL,   NULL,   i32f32, i32f64}, // u16
+    {i32i8, i32i16, NULL,   u64i32, i32u8, i32u16, NULL,   u64i32, u32f32, u32f64}, // u32
+    {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   u64f32, u64f64}, // u64
+    {f32i8, f32i16, f32i32, f32i64, f32u8, f32u16, f32u32, f32u64, NULL,   f32f64}, // f32
+    {f64i8, f64i16, f64i32, f64i64, f64u8, f64u16, f64u32, f64u64, f64f32, NULL},   // f64
 };
 
 static void cmp_zero(Type *ty) {
-    if (is_integer(ty) && ty->size <= 4)
+    if (ty->kind == TY_FLOAT) {
+        println("    fmov s1, wzr");
+        println("    fcmp s0, s1");
+    } else if (ty->kind == TY_DOUBLE) {
+        println("    fmov d1, xzr");
+        println("    fcmp d0, d1");
+    } else if (is_integer(ty) && ty->size <= 4) {
         println("    cmp w0, #0");
-    else
+    } else {
         println("    cmp x0, #0");
+    }
 }
 
 static void cast(Type *from, Type *to) {
