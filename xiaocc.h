@@ -76,6 +76,7 @@ struct Obj {
     Obj *next;
     char *name;    // 变量名
     Type *ty;      // 类型
+    Token *tok;    // 代表 Token
     bool is_local; // 局部变量还是全局变量/函数
     int align;     // 对齐
 
@@ -241,6 +242,7 @@ struct Type {
 
     // 声明
     Token *name;
+    Token *name_pos;
 
     // 数组
     int array_len;
