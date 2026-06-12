@@ -227,6 +227,7 @@ struct Type {
     TypeKind kind;
     int size;      // sizeof() 值
     int align;     // 对齐
+    bool is_unsigned; // 无符号还是带符号
 
     // 指针或数组的基类型。我们有意使用同一个成员
     // 来表示 C 语言中的指针/数组二元性。
@@ -273,6 +274,11 @@ extern Type *ty_char;
 extern Type *ty_short;
 extern Type *ty_int;
 extern Type *ty_long;
+
+extern Type *ty_uchar;
+extern Type *ty_ushort;
+extern Type *ty_uint;
+extern Type *ty_ulong;
 
 bool is_integer(Type *ty);
 Type *copy_type(Type *ty);

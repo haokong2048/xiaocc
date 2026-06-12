@@ -38,14 +38,24 @@ static void load(Type *ty) {
     if (ty->kind == TY_ARRAY || ty->kind == TY_STRUCT || ty->kind == TY_UNION)
         return;
 
-    if (ty->size == 1)
-        println("    ldrsb x0, [x0]");
-    else if (ty->size == 2)
-        println("    ldrsh x0, [x0]");
-    else if (ty->size == 4)
-        println("    ldrsw x0, [x0]");
-    else
+    if (ty->size == 1) {
+        if (ty->is_unsigned)
+            println("    ldrb w0, [x0]");
+        else
+            println("    ldrsb x0, [x0]");
+    } else if (ty->size == 2) {
+        if (ty->is_unsigned)
+            println("    ldrh w0, [x0]");
+        else
+            println("    ldrsh x0, [x0]");
+    } else if (ty->size == 4) {
+        if (ty->is_unsigned)
+            println("    ldr w0, [x0]");
+        else
+            println("    ldrsw x0, [x0]");
+    } else {
         println("    ldr x0, [x0]");
+    }
 }
 
 // 将 x0 存储到栈顶指向的地址中
@@ -105,33 +115,45 @@ static void gen_addr(Node *node) {
     error_tok(node->tok, "not an lvalue");
 }
 
-enum { I8, I16, I32, I64 };
+enum { I8, I16, I32, I64, U8, U16, U32, U64 };
 
 static int getTypeId(Type *ty) {
     switch (ty->kind) {
     case TY_BOOL:
     case TY_CHAR:
-        return I8;
+        return ty->is_unsigned ? U8 : I8;
     case TY_SHORT:
-        return I16;
+        return ty->is_unsigned ? U16 : I16;
     case TY_INT:
-        return I32;
+        return ty->is_unsigned ? U32 : I32;
+    case TY_LONG:
+        return ty->is_unsigned ? U64 : I64;
     }
-    return I64;
+    return U64;
 }
 
-// ARM64 类型转换：使用符号扩展指令处理截断和扩展。
-// sxtb: 符号扩展 8→32, sxth: 符号扩展 16→32, sxtw: 符号扩展 32→64
+// ARM64 类型转换：使用符号/零扩展指令
+// sxtb: 符号扩展 8→32, uxtb: 零扩展 8→32
+// sxth: 符号扩展 16→32, uxth: 零扩展 16→32
+// sxtw: 符号扩展 32→64
+// mov w0, w0: 零扩展 32→64
 static char i32i8[]  = "sxtb w0, w0";
+static char i32u8[]  = "uxtb w0, w0";
 static char i32i16[] = "sxth w0, w0";
+static char i32u16[] = "uxth w0, w0";
 static char i64i32[] = "sxtw x0, w0";
+static char u64i32[] = "mov w0, w0";
 
 static char *cast_table[][10] = {
-    // i8  i16 i32 i64
-    {NULL,  NULL,   NULL, NULL},    // i8
-    {i32i8, NULL,   NULL, NULL},    // i16
-    {i32i8, i32i16, NULL, i64i32},  // i32
-    {i32i8, i32i16, NULL, NULL},    // i64
+    // i8   i16     i32   i64     u8     u16     u32   u64
+    {NULL,  NULL,   NULL, NULL,   i32u8, i32u16, NULL, NULL},   // i8
+    {i32i8, NULL,   NULL, NULL,   i32u8, i32u16, NULL, NULL},   // i16
+    {i32i8, i32i16, NULL, i64i32, i32u8, i32u16, NULL, i64i32}, // i32
+    {i32i8, i32i16, NULL, NULL,   i32u8, i32u16, NULL, NULL},   // i64
+    {i32i8, NULL,   NULL, NULL,   NULL,  NULL,   NULL, NULL},   // u8
+    {i32i8, i32i16, NULL, NULL,   i32u8, NULL,   NULL, NULL},   // u16
+    {i32i8, i32i16, NULL, u64i32, i32u8, i32u16, NULL, u64i32}, // u32
+    {i32i8, i32i16, NULL, NULL,   i32u8, i32u16, NULL, NULL},   // u64
 };
 
 static void cmp_zero(Type *ty) {
@@ -294,10 +316,16 @@ static void gen_expr(Node *node) {
             println("    and w0, w0, #0xff");
             return;
         case TY_CHAR:
-            println("    sxtb w0, w0");
+            if (node->ty->is_unsigned)
+                println("    uxtb w0, w0");
+            else
+                println("    sxtb w0, w0");
             return;
         case TY_SHORT:
-            println("    sxth w0, w0");
+            if (node->ty->is_unsigned)
+                println("    uxth w0, w0");
+            else
+                println("    sxth w0, w0");
             return;
         }
         return;
@@ -331,11 +359,19 @@ static void gen_expr(Node *node) {
         println("    mul %s, %s, %s", r0, r0, r1);
         return;
     case ND_DIV:
-        println("    sdiv %s, %s, %s", r0, r0, r1);
+        if (node->ty->is_unsigned)
+            println("    udiv %s, %s, %s", r0, r0, r1);
+        else
+            println("    sdiv %s, %s, %s", r0, r0, r1);
         return;
     case ND_MOD:
-        println("    sdiv %s, %s, %s", r2, r0, r1);
-        println("    msub %s, %s, %s, %s", r0, r2, r1, r0);
+        if (node->ty->is_unsigned) {
+            println("    udiv %s, %s, %s", r2, r0, r1);
+            println("    msub %s, %s, %s, %s", r0, r2, r1, r0);
+        } else {
+            println("    sdiv %s, %s, %s", r2, r0, r1);
+            println("    msub %s, %s, %s, %s", r0, r2, r1, r0);
+        }
         return;
     case ND_BITAND:
         println("    and %s, %s, %s", r0, r0, r1);
@@ -350,7 +386,10 @@ static void gen_expr(Node *node) {
         println("    lsl %s, %s, %s", r0, r0, r1);
         return;
     case ND_SHR:
-        println("    asr %s, %s, %s", r0, r0, r1);
+        if (node->lhs->ty->is_unsigned)
+            println("    lsr %s, %s, %s", r0, r0, r1);
+        else
+            println("    asr %s, %s, %s", r0, r0, r1);
         return;
     case ND_EQ:
     case ND_NE:
@@ -363,9 +402,9 @@ static void gen_expr(Node *node) {
         else if (node->kind == ND_NE)
             println("    cset x0, ne");
         else if (node->kind == ND_LT)
-            println("    cset x0, lt");
+            println("    cset x0, %s", node->lhs->ty->is_unsigned ? "lo" : "lt");
         else if (node->kind == ND_LE)
-            println("    cset x0, le");
+            println("    cset x0, %s", node->lhs->ty->is_unsigned ? "ls" : "le");
 
         return;
     }
