@@ -356,7 +356,7 @@ static void gen_expr(Node *node) {
     case ND_COND: {
         int c = count();
         gen_expr(node->cond);
-        println("    cmp x0, #0");
+        cmp_zero(node->cond->ty);
         println("    b.eq .L.else.%d", c);
         gen_expr(node->then);
         println("    b .L.end.%d", c);
@@ -367,7 +367,7 @@ static void gen_expr(Node *node) {
     }
     case ND_NOT:
         gen_expr(node->lhs);
-        println("    cmp x0, #0");
+        cmp_zero(node->lhs->ty);
         println("    cset x0, eq");
         return;
     case ND_BITNOT:
@@ -377,10 +377,10 @@ static void gen_expr(Node *node) {
     case ND_LOGAND: {
         int c = count();
         gen_expr(node->lhs);
-        println("    cmp x0, #0");
+        cmp_zero(node->lhs->ty);
         println("    b.eq .L.false.%d", c);
         gen_expr(node->rhs);
-        println("    cmp x0, #0");
+        cmp_zero(node->rhs->ty);
         println("    b.eq .L.false.%d", c);
         println("    mov x0, #1");
         println("    b .L.end.%d", c);
@@ -392,10 +392,10 @@ static void gen_expr(Node *node) {
     case ND_LOGOR: {
         int c = count();
         gen_expr(node->lhs);
-        println("    cmp x0, #0");
+        cmp_zero(node->lhs->ty);
         println("    b.ne .L.true.%d", c);
         gen_expr(node->rhs);
-        println("    cmp x0, #0");
+        cmp_zero(node->rhs->ty);
         println("    b.ne .L.true.%d", c);
         println("    mov x0, #0");
         println("    b .L.end.%d", c);
@@ -594,7 +594,7 @@ static void gen_stmt(Node *node) {
     case ND_IF: {
         int c = count();
         gen_expr(node->cond);
-        println("    cmp x0, #0");
+        cmp_zero(node->cond->ty);
         println("    b.eq .L.else.%d", c);
         gen_stmt(node->then);
         println("    b .L.end.%d", c);
@@ -611,7 +611,7 @@ static void gen_stmt(Node *node) {
         println(".L.begin.%d:", c);
         if (node->cond) {
             gen_expr(node->cond);
-            println("    cmp x0, #0");
+            cmp_zero(node->cond->ty);
             println("    b.eq %s", node->brk_label);
         }
         gen_stmt(node->then);
@@ -628,7 +628,7 @@ static void gen_stmt(Node *node) {
         gen_stmt(node->then);
         println("%s:", node->cont_label);
         gen_expr(node->cond);
-        println("    cmp x0, #0");
+        cmp_zero(node->cond->ty);
         println("    b.ne .L.begin.%d", c);
         println("%s:", node->brk_label);
         return;
