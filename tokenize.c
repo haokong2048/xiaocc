@@ -1,505 +1,534 @@
 #include "xiaocc.h"
 
-// 输入文件名
-static char *current_filename;
+// Input file
+static File *current_file;
 
-// 当前输入字符串
-static char *current_input;
+// A list of all input files.
+static File **input_files;
 
-// 当前位置是否在行首
+// True if the current position is at the beginning of a line
 static bool at_bol;
 
-// 报告错误并退出
+// Reports an error and exit.
 void error(char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    exit(1);
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
+  exit(1);
 }
 
-// 以以下格式报告错误位置并退出
+// Reports an error message in the following format.
 //
 // foo.c:10: x = y + 1;
-//               ^ <错误信息>
-static void verror_at(int line_no, char *loc, char *fmt, va_list ap) {
-    // 查找包含 loc 的行
-    char *line = loc;
-    while (current_input < line && line[-1] != '\n')
-        line--;
+//               ^ <error message here>
+static void verror_at(char *filename, char *input, int line_no,
+                      char *loc, char *fmt, va_list ap) {
+  // Find a line containing `loc`.
+  char *line = loc;
+  while (input < line && line[-1] != '\n')
+    line--;
 
-    char *end = loc;
-    while (*end != '\n')
-        end++;
+  char *end = loc;
+  while (*end != '\n')
+    end++;
 
-    // 打印该行
-    int indent = fprintf(stderr, "%s:%d: ", current_filename, line_no);
-    fprintf(stderr, "%.*s\n", (int)(end - line), line);
+  // Print out the line.
+  int indent = fprintf(stderr, "%s:%d: ", filename, line_no);
+  fprintf(stderr, "%.*s\n", (int)(end - line), line);
 
-    // 显示错误信息
-    int pos = loc - line + indent;
+  // Show the error message.
+  int pos = loc - line + indent;
 
-    fprintf(stderr, "%*s", pos, ""); // 打印 pos 个空格
-    fprintf(stderr, "^ ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
+  fprintf(stderr, "%*s", pos, ""); // print pos spaces.
+  fprintf(stderr, "^ ");
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
 }
 
 void error_at(char *loc, char *fmt, ...) {
-    int line_no = 1;
-    for (char *p = current_input; p < loc; p++)
-        if (*p == '\n')
-            line_no++;
+  int line_no = 1;
+  for (char *p = current_file->contents; p < loc; p++)
+    if (*p == '\n')
+      line_no++;
 
-    va_list ap;
-    va_start(ap, fmt);
-    verror_at(line_no, loc, fmt, ap);
-    exit(1);
+  va_list ap;
+  va_start(ap, fmt);
+  verror_at(current_file->name, current_file->contents, line_no, loc, fmt, ap);
+  exit(1);
 }
 
 void error_tok(Token *tok, char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    verror_at(tok->line_no, tok->loc, fmt, ap);
-    exit(1);
+  va_list ap;
+  va_start(ap, fmt);
+  verror_at(tok->file->name, tok->file->contents, tok->line_no, tok->loc, fmt, ap);
+  exit(1);
 }
 
-// 判断当前 Token 是否匹配字符串 op
+// Consumes the current token if it matches `op`.
 bool equal(Token *tok, char *op) {
-    return memcmp(tok->loc, op, tok->len) == 0 && op[tok->len] == '\0';
+  return memcmp(tok->loc, op, tok->len) == 0 && op[tok->len] == '\0';
 }
 
-// 确保当前 Token 为 op
+// Ensure that the current token is `op`.
 Token *skip(Token *tok, char *op) {
-    if (!equal(tok, op))
-        error_tok(tok, "expected '%s'", op);
-    return tok->next;
+  if (!equal(tok, op))
+    error_tok(tok, "expected '%s'", op);
+  return tok->next;
 }
 
 bool consume(Token **rest, Token *tok, char *str) {
-    if (equal(tok, str)) {
-        *rest = tok->next;
-        return true;
-    }
-    *rest = tok;
-    return false;
+  if (equal(tok, str)) {
+    *rest = tok->next;
+    return true;
+  }
+  *rest = tok;
+  return false;
 }
 
-// 创建一个新的 Token
+// Create a new token.
 static Token *new_token(TokenKind kind, char *start, char *end) {
-    Token *tok = calloc(1, sizeof(Token));
-    tok->kind = kind;
-    tok->loc = start;
-    tok->len = end - start;
-    tok->at_bol = at_bol;
-    at_bol = false;
-    return tok;
+  Token *tok = calloc(1, sizeof(Token));
+  tok->kind = kind;
+  tok->loc = start;
+  tok->len = end - start;
+  tok->file = current_file;
+  tok->at_bol = at_bol;
+  at_bol = false;
+  return tok;
 }
 
 static bool startswith(char *p, char *q) {
-    return strncmp(p, q, strlen(q)) == 0;
+  return strncmp(p, q, strlen(q)) == 0;
 }
 
-// 如果 c 是标识符的首字符，返回 true
+// Returns true if c is valid as the first character of an identifier.
 static bool is_ident1(char c) {
-    return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
+  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
 }
 
-// 如果 c 是标识符的非首字符，返回 true
+// Returns true if c is valid as a non-first character of an identifier.
 static bool is_ident2(char c) {
-    return is_ident1(c) || ('0' <= c && c <= '9');
+  return is_ident1(c) || ('0' <= c && c <= '9');
 }
 
 static int from_hex(char c) {
-    if ('0' <= c && c <= '9')
-        return c - '0';
-    if ('a' <= c && c <= 'f')
-        return c - 'a' + 10;
-    return c - 'A' + 10;
+  if ('0' <= c && c <= '9')
+    return c - '0';
+  if ('a' <= c && c <= 'f')
+    return c - 'a' + 10;
+  return c - 'A' + 10;
 }
 
-// 从 p 读取标点符号并返回其长度
+// Read a punctuator token from p and returns its length.
 static int read_punct(char *p) {
-    static char *kw[] = {
-        "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=",
-        "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "&&",
-        "||", "<<", ">>",
-    };
+  static char *kw[] = {
+    "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=",
+    "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "&&",
+    "||", "<<", ">>",
+  };
 
-    for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-        if (startswith(p, kw[i]))
-            return strlen(kw[i]);
+  for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
+    if (startswith(p, kw[i]))
+      return strlen(kw[i]);
 
-    return ispunct(*p) ? 1 : 0;
+  return ispunct(*p) ? 1 : 0;
 }
 
 static bool is_keyword(Token *tok) {
-    static char *kw[] = {
-        "return", "if", "else", "for", "while", "int", "sizeof", "char",
-        "struct", "union", "short", "long", "void", "typedef", "_Bool",
-        "enum", "static", "goto", "break", "continue", "switch", "case",
-        "default", "extern", "_Alignof", "_Alignas", "do", "signed",
-        "unsigned", "const", "volatile", "auto", "register", "restrict",
-        "__restrict", "__restrict__", "_Noreturn", "float", "double",
-    };
+  static char *kw[] = {
+    "return", "if", "else", "for", "while", "int", "sizeof", "char",
+    "struct", "union", "short", "long", "void", "typedef", "_Bool",
+    "enum", "static", "goto", "break", "continue", "switch", "case",
+    "default", "extern", "_Alignof", "_Alignas", "do", "signed",
+    "unsigned", "const", "volatile", "auto", "register", "restrict",
+    "__restrict", "__restrict__", "_Noreturn", "float", "double",
+  };
 
-    for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-        if (equal(tok, kw[i]))
-            return true;
-    return false;
+  for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
+    if (equal(tok, kw[i]))
+      return true;
+  return false;
 }
 
 static int read_escaped_char(char **new_pos, char *p) {
+  if ('0' <= *p && *p <= '7') {
+    // Read an octal number.
+    int c = *p++ - '0';
     if ('0' <= *p && *p <= '7') {
-        // 读取八进制数
-        int c = *p++ - '0';
-        if ('0' <= *p && *p <= '7') {
-            c = (c << 3) + (*p++ - '0');
-            if ('0' <= *p && *p <= '7')
-                c = (c << 3) + (*p++ - '0');
-        }
-        *new_pos = p;
-        return c;
+      c = (c << 3) + (*p++ - '0');
+      if ('0' <= *p && *p <= '7')
+        c = (c << 3) + (*p++ - '0');
     }
+    *new_pos = p;
+    return c;
+  }
 
-    if (*p == 'x') {
-        // 读取十六进制数
-        p++;
-        if (!isxdigit(*p))
-            error_at(p, "invalid hex escape sequence");
+  if (*p == 'x') {
+    // Read a hexadecimal number.
+    p++;
+    if (!isxdigit(*p))
+      error_at(p, "invalid hex escape sequence");
 
-        int c = 0;
-        for (; isxdigit(*p); p++)
-            c = (c << 4) + from_hex(*p);
-        *new_pos = p;
-        return c;
-    }
+    int c = 0;
+    for (; isxdigit(*p); p++)
+      c = (c << 4) + from_hex(*p);
+    *new_pos = p;
+    return c;
+  }
 
-    *new_pos = p + 1;
+  *new_pos = p + 1;
 
-    // 转义序列在此用它们自身来定义。例如 '\n' 用 '\n' 来实现。
-    // 这种同义反复的定义之所以可行，是因为编译我们编译器的编译器
-    // 知道 '\n' 的实际含义。换句话说，我们从编译器的编译器中
-    // "继承"了 '\n' 的 ASCII 码，因此无需在此手动编写实际代码。
-    //
-    // 这一事实不仅对编译器的正确性有重大影响，对生成代码的安全性
-    // 也是如此。详见 Ken Thompson 的 "Reflections on Trusting Trust"。
-    // https://github.com/rui314/chibicc/wiki/thompson1984.pdf
-    switch (*p) {
-    case 'a': return '\a';
-    case 'b': return '\b';
-    case 't': return '\t';
-    case 'n': return '\n';
-    case 'v': return '\v';
-    case 'f': return '\f';
-    case 'r': return '\r';
-    // [GNU] \e 表示 ASCII 转义字符，是 GNU C 扩展
-    case 'e': return 27;
-    default: return *p;
-    }
+  // Escape sequences are defined using themselves here. E.g.
+  // '\n' is implemented using '\n'. This tautological definition
+  // works because the compiler that compiles our compiler knows
+  // what '\n' actually is. In other words, we "inherit" the ASCII
+  // code of '\n' from the compiler that compiles our compiler,
+  // so we don't have to teach the actual code here.
+  //
+  // This fact has huge implications not only for the correctness
+  // of the compiler but also for the security of the generated code.
+  // For more info, read "Reflections on Trusting Trust" by Ken Thompson.
+  // https://github.com/rui314/chibicc/wiki/thompson1984.pdf
+  switch (*p) {
+  case 'a': return '\a';
+  case 'b': return '\b';
+  case 't': return '\t';
+  case 'n': return '\n';
+  case 'v': return '\v';
+  case 'f': return '\f';
+  case 'r': return '\r';
+  // [GNU] \e for the ASCII escape character is a GNU C extension.
+  case 'e': return 27;
+  default: return *p;
+  }
 }
 
-// 查找字符串的结束双引号
+// Find a closing double-quote.
 static char *string_literal_end(char *p) {
-    char *start = p;
-    for (; *p != '"'; p++) {
-        if (*p == '\n' || *p == '\0')
-            error_at(start, "unclosed string literal");
-        if (*p == '\\')
-            p++;
-    }
-    return p;
+  char *start = p;
+  for (; *p != '"'; p++) {
+    if (*p == '\n' || *p == '\0')
+      error_at(start, "unclosed string literal");
+    if (*p == '\\')
+      p++;
+  }
+  return p;
 }
 
 static Token *read_string_literal(char *start) {
-    char *end = string_literal_end(start + 1);
-    char *buf = calloc(1, end - start);
-    int len = 0;
+  char *end = string_literal_end(start + 1);
+  char *buf = calloc(1, end - start);
+  int len = 0;
 
-    for (char *p = start + 1; p < end;) {
-        if (*p == '\\')
-            buf[len++] = read_escaped_char(&p, p + 1);
-        else
-            buf[len++] = *p++;
-    }
+  for (char *p = start + 1; p < end;) {
+    if (*p == '\\')
+      buf[len++] = read_escaped_char(&p, p + 1);
+    else
+      buf[len++] = *p++;
+  }
 
-    Token *tok = new_token(TK_STR, start, end + 1);
-    tok->ty = array_of(ty_char, len + 1);
-    tok->str = buf;
-    return tok;
+  Token *tok = new_token(TK_STR, start, end + 1);
+  tok->ty = array_of(ty_char, len + 1);
+  tok->str = buf;
+  return tok;
 }
 
 static Token *read_char_literal(char *start) {
-    char *p = start + 1;
-    if (*p == '\0')
-        error_at(start, "字符字面量未闭合");
+  char *p = start + 1;
+  if (*p == '\0')
+    error_at(start, "unclosed char literal");
 
-    char c;
-    if (*p == '\\')
-        c = read_escaped_char(&p, p + 1);
-    else
-        c = *p++;
+  char c;
+  if (*p == '\\')
+    c = read_escaped_char(&p, p + 1);
+  else
+    c = *p++;
 
-    char *end = strchr(p, '\'');
-    if (!end)
-        error_at(p, "字符字面量未闭合");
+  char *end = strchr(p, '\'');
+  if (!end)
+    error_at(p, "unclosed char literal");
 
-    Token *tok = new_token(TK_NUM, start, end + 1);
-    tok->val = c;
-    tok->ty = ty_int;
-    return tok;
+  Token *tok = new_token(TK_NUM, start, end + 1);
+  tok->val = c;
+  tok->ty = ty_int;
+  return tok;
 }
 
 static Token *read_int_literal(char *start) {
-    char *p = start;
+  char *p = start;
 
-    // 读取二进制、八进制、十进制或十六进制数字
-    int base = 10;
-    if (!strncasecmp(p, "0x", 2) && isxdigit(p[2])) {
-        p += 2;
-        base = 16;
-    } else if (!strncasecmp(p, "0b", 2) && (p[2] == '0' || p[2] == '1')) {
-        p += 2;
-        base = 2;
-    } else if (*p == '0') {
-        base = 8;
-    }
+  // Read a binary, octal, decimal or hexadecimal number.
+  int base = 10;
+  if (!strncasecmp(p, "0x", 2) && isxdigit(p[2])) {
+    p += 2;
+    base = 16;
+  } else if (!strncasecmp(p, "0b", 2) && (p[2] == '0' || p[2] == '1')) {
+    p += 2;
+    base = 2;
+  } else if (*p == '0') {
+    base = 8;
+  }
 
-    int64_t val = strtoul(p, &p, base);
+  int64_t val = strtoul(p, &p, base);
 
-    // 读取 U, L 或 LL 后缀
-    bool l = false;
-    bool u = false;
+  // Read U, L or LL suffixes.
+  bool l = false;
+  bool u = false;
 
-    if (startswith(p, "LLU") || startswith(p, "LLu") ||
-        startswith(p, "llU") || startswith(p, "llu") ||
-        startswith(p, "ULL") || startswith(p, "Ull") ||
-        startswith(p, "uLL") || startswith(p, "ull")) {
-        p += 3;
-        l = u = true;
-    } else if (!strncasecmp(p, "lu", 2) || !strncasecmp(p, "ul", 2)) {
-        p += 2;
-        l = u = true;
-    } else if (startswith(p, "LL") || startswith(p, "ll")) {
-        p += 2;
-        l = true;
-    } else if (*p == 'L' || *p == 'l') {
-        p++;
-        l = true;
-    } else if (*p == 'U' || *p == 'u') {
-        p++;
-        u = true;
-    }
+  if (startswith(p, "LLU") || startswith(p, "LLu") ||
+      startswith(p, "llU") || startswith(p, "llu") ||
+      startswith(p, "ULL") || startswith(p, "Ull") ||
+      startswith(p, "uLL") || startswith(p, "ull")) {
+    p += 3;
+    l = u = true;
+  } else if (!strncasecmp(p, "lu", 2) || !strncasecmp(p, "ul", 2)) {
+    p += 2;
+    l = u = true;
+  } else if (startswith(p, "LL") || startswith(p, "ll")) {
+    p += 2;
+    l = true;
+  } else if (*p == 'L' || *p == 'l') {
+    p++;
+    l = true;
+  } else if (*p == 'U' || *p == 'u') {
+    p++;
+    u = true;
+  }
 
-    // 有效性检查由 read_number 处理
-    // (移除旧的 isalnum 检查)
+  // Infer a type.
+  Type *ty;
+  if (base == 10) {
+    if (l && u)
+      ty = ty_ulong;
+    else if (l)
+      ty = ty_long;
+    else if (u)
+      ty = (val >> 32) ? ty_ulong : ty_uint;
+    else
+      ty = (val >> 31) ? ty_long : ty_int;
+  } else {
+    if (l && u)
+      ty = ty_ulong;
+    else if (l)
+      ty = (val >> 63) ? ty_ulong : ty_long;
+    else if (u)
+      ty = (val >> 32) ? ty_ulong : ty_uint;
+    else if (val >> 63)
+      ty = ty_ulong;
+    else if (val >> 32)
+      ty = ty_long;
+    else if (val >> 31)
+      ty = ty_uint;
+    else
+      ty = ty_int;
+  }
 
-    // 推断类型
-    Type *ty;
-    if (base == 10) {
-        if (l && u)
-            ty = ty_ulong;
-        else if (l)
-            ty = ty_long;
-        else if (u)
-            ty = (val >> 32) ? ty_ulong : ty_uint;
-        else
-            ty = (val >> 31) ? ty_long : ty_int;
-    } else {
-        if (l && u)
-            ty = ty_ulong;
-        else if (l)
-            ty = (val >> 63) ? ty_ulong : ty_long;
-        else if (u)
-            ty = (val >> 32) ? ty_ulong : ty_uint;
-        else if (val >> 63)
-            ty = ty_ulong;
-        else if (val >> 32)
-            ty = ty_long;
-        else if (val >> 31)
-            ty = ty_uint;
-        else
-            ty = ty_int;
-    }
-
-    Token *tok = new_token(TK_NUM, start, p);
-    tok->val = val;
-    tok->ty = ty;
-    return tok;
+  Token *tok = new_token(TK_NUM, start, p);
+  tok->val = val;
+  tok->ty = ty;
+  return tok;
 }
 
 static Token *read_number(char *start) {
-    // 尝试解析为整数常量
-    Token *tok = read_int_literal(start);
-    if (!strchr(".eEfF", start[tok->len]))
-        return tok;
-
-    // 如果不是整数，则必须是浮点常量
-    char *end;
-    double val = strtod(start, &end);
-
-    Type *ty;
-    if (*end == 'f' || *end == 'F') {
-        ty = ty_float;
-        end++;
-    } else if (*end == 'l' || *end == 'L') {
-        ty = ty_double;
-        end++;
-    } else {
-        ty = ty_double;
-    }
-
-    tok = new_token(TK_NUM, start, end);
-    tok->fval = val;
-    tok->ty = ty;
+  // Try to parse as an integer constant.
+  Token *tok = read_int_literal(start);
+  if (!strchr(".eEfF", start[tok->len]))
     return tok;
-}
 
-// 为所有 token 初始化行号信息
-static void add_line_numbers(Token *tok) {
-    char *p = current_input;
-    int n = 1;
+  // If it's not an integer, it must be a floating point constant.
+  char *end;
+  double val = strtod(start, &end);
 
-    do {
-        if (p == tok->loc) {
-            tok->line_no = n;
-            tok = tok->next;
-        }
-        if (*p == '\n')
-            n++;
-    } while (*p++);
+  Type *ty;
+  if (*end == 'f' || *end == 'F') {
+    ty = ty_float;
+    end++;
+  } else if (*end == 'l' || *end == 'L') {
+    ty = ty_double;
+    end++;
+  } else {
+    ty = ty_double;
+  }
+
+  tok = new_token(TK_NUM, start, end);
+  tok->fval = val;
+  tok->ty = ty;
+  return tok;
 }
 
 void convert_keywords(Token *tok) {
-    for (Token *t = tok; t->kind != TK_EOF; t = t->next)
-        if (is_keyword(t))
-            t->kind = TK_KEYWORD;
+  for (Token *t = tok; t->kind != TK_EOF; t = t->next)
+    if (is_keyword(t))
+      t->kind = TK_KEYWORD;
 }
 
-// 对输入字符串进行词法分析，返回 Token 链表
-static Token *tokenize(char *filename, char *p) {
-    current_filename = filename;
-    current_input = p;
-    at_bol = true;
-    Token head = {};
-    Token *cur = &head;
+// Initialize line info for all tokens.
+static void add_line_numbers(Token *tok) {
+  char *p = current_file->contents;
+  int n = 1;
 
-    while (*p) {
-        // 跳过新行
-        if (*p == '\n') {
-            p++;
-            at_bol = true;
-            continue;
-        }
+  do {
+    if (p == tok->loc) {
+      tok->line_no = n;
+      tok = tok->next;
+    }
+    if (*p == '\n')
+      n++;
+  } while (*p++);
+}
 
-        // 跳过行注释
-        if (startswith(p, "//")) {
-            p += 2;
-            while (*p != '\n')
-                p++;
-            continue;
-        }
+// Tokenize a given string and returns new tokens.
+static Token *tokenize(File *file) {
+  current_file = file;
 
-        // 跳过块注释
-        if (startswith(p, "/*")) {
-            char *q = strstr(p + 2, "*/");
-            if (!q)
-                error_at(p, "unclosed block comment");
-            p = q + 2;
-            continue;
-        }
+  char *p = file->contents;
+  Token head = {};
+  Token *cur = &head;
 
-        // 跳过空白字符
-        if (isspace(*p)) {
-            p++;
-            continue;
-        }
+  at_bol = true;
 
-        // 数字字面量
-        if (isdigit(*p) || (*p == '.' && isdigit(p[1]))) {
-            cur = cur->next = read_number(p);
-            p += cur->len;
-            continue;
-        }
-
-        // 字符串字面量
-        if (*p == '"') {
-            cur = cur->next = read_string_literal(p);
-            p += cur->len;
-            continue;
-        }
-
-        // 字符字面量
-        if (*p == '\'') {
-            cur = cur->next = read_char_literal(p);
-            p += cur->len;
-            continue;
-        }
-
-        // 标识符或关键字
-        if (is_ident1(*p)) {
-            char *start = p;
-            do {
-                p++;
-            } while (is_ident2(*p));
-            cur = cur->next = new_token(TK_IDENT, start, p);
-            continue;
-        }
-
-        // 标点符号
-        int punct_len = read_punct(p);
-        if (punct_len) {
-            cur = cur->next = new_token(TK_PUNCT, p, p + punct_len);
-            p += cur->len;
-            continue;
-        }
-
-        error_at(p, "invalid token");
+  while (*p) {
+    // Skip line comments.
+    if (startswith(p, "//")) {
+      p += 2;
+      while (*p != '\n')
+        p++;
+      continue;
     }
 
-    cur = cur->next = new_token(TK_EOF, p, p);
-    add_line_numbers(head.next);
-    return head.next;
+    // Skip block comments.
+    if (startswith(p, "/*")) {
+      char *q = strstr(p + 2, "*/");
+      if (!q)
+        error_at(p, "unclosed block comment");
+      p = q + 2;
+      continue;
+    }
+
+    // Skip newline.
+    if (*p == '\n') {
+      p++;
+      at_bol = true;
+      continue;
+    }
+
+    // Skip whitespace characters.
+    if (isspace(*p)) {
+      p++;
+      continue;
+    }
+
+    // Numeric literal
+    if (isdigit(*p) || (*p == '.' && isdigit(p[1]))) {
+      cur = cur->next = read_number(p);
+      p += cur->len;
+      continue;
+    }
+
+    // String literal
+    if (*p == '"') {
+      cur = cur->next = read_string_literal(p);
+      p += cur->len;
+      continue;
+    }
+
+    // Character literal
+    if (*p == '\'') {
+      cur = cur->next = read_char_literal(p);
+      p += cur->len;
+      continue;
+    }
+
+    // Identifier or keyword
+    if (is_ident1(*p)) {
+      char *start = p;
+      do {
+        p++;
+      } while (is_ident2(*p));
+      cur = cur->next = new_token(TK_IDENT, start, p);
+      continue;
+    }
+
+    // Punctuators
+    int punct_len = read_punct(p);
+    if (punct_len) {
+      cur = cur->next = new_token(TK_PUNCT, p, p + punct_len);
+      p += cur->len;
+      continue;
+    }
+
+    error_at(p, "invalid token");
+  }
+
+  cur = cur->next = new_token(TK_EOF, p, p);
+  add_line_numbers(head.next);
+  return head.next;
 }
 
-// 返回给定文件的内容
+// Returns the contents of a given file.
 static char *read_file(char *path) {
-    FILE *fp;
+  FILE *fp;
 
-    if (strcmp(path, "-") == 0) {
-        // 按惯例，如果文件名为 "-" 则从标准输入读取
-        fp = stdin;
-    } else {
-        fp = fopen(path, "r");
-        if (!fp)
-            error("cannot open %s: %s", path, strerror(errno));
-    }
+  if (strcmp(path, "-") == 0) {
+    // By convention, read from stdin if a given filename is "-".
+    fp = stdin;
+  } else {
+    fp = fopen(path, "r");
+    if (!fp)
+      return NULL;
+  }
 
-    char *buf;
-    size_t buflen;
-    FILE *out = open_memstream(&buf, &buflen);
+  char *buf;
+  size_t buflen;
+  FILE *out = open_memstream(&buf, &buflen);
 
-    // 读取整个文件
-    for (;;) {
-        char buf2[4096];
-        int n = fread(buf2, 1, sizeof(buf2), fp);
-        if (n == 0)
-            break;
-        fwrite(buf2, 1, n, out);
-    }
+  // Read the entire file.
+  for (;;) {
+    char buf2[4096];
+    int n = fread(buf2, 1, sizeof(buf2), fp);
+    if (n == 0)
+      break;
+    fwrite(buf2, 1, n, out);
+  }
 
-    if (fp != stdin)
-        fclose(fp);
+  if (fp != stdin)
+    fclose(fp);
 
-    // 确保最后一行以 '\n' 正确终止
-    fflush(out);
-    if (buflen == 0 || buf[buflen - 1] != '\n')
-        fputc('\n', out);
-    fputc('\0', out);
-    fclose(out);
-    return buf;
+  // Make sure that the last line is properly terminated with '\n'.
+  fflush(out);
+  if (buflen == 0 || buf[buflen - 1] != '\n')
+    fputc('\n', out);
+  fputc('\0', out);
+  fclose(out);
+  return buf;
+}
+
+File **get_input_files(void) {
+  return input_files;
+}
+
+static File *new_file(char *name, int file_no, char *contents) {
+  File *file = calloc(1, sizeof(File));
+  file->name = name;
+  file->file_no = file_no;
+  file->contents = contents;
+  return file;
 }
 
 Token *tokenize_file(char *path) {
-    return tokenize(path, read_file(path));
+  char *p = read_file(path);
+  if (!p)
+    return NULL;
+
+  static int file_no;
+  File *file = new_file(path, file_no + 1, p);
+
+  // Save the filename for assembler .file directive.
+  input_files = realloc(input_files, sizeof(char *) * (file_no + 2));
+  input_files[file_no] = file;
+  input_files[file_no + 1] = NULL;
+  file_no++;
+
+  return tokenize(file);
 }

@@ -51,6 +51,8 @@ int main(int argc, char **argv) {
 
     // 词法分析 + 语法分析
     Token *tok = tokenize_file(input_path);
+    if (!tok)
+        error("%s: %s", input_path, strerror(errno));
     tok = preprocess(tok);
     Obj *prog = parse(tok);
 

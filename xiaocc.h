@@ -41,6 +41,12 @@ typedef enum {
     TK_EOF,     // 文件结束标记
 } TokenKind;
 
+typedef struct {
+    char *name;
+    int file_no;
+    char *contents;
+} File;
+
 // Token 类型
 typedef struct Token Token;
 struct Token {
@@ -53,6 +59,7 @@ struct Token {
     Type *ty;       // 如果类型是 TK_NUM 或 TK_STR 则使用
     char *str;      // 字符串字面量内容（含结尾 '\0'）
 
+    File *file;     // 源文件位置
     int line_no;    // 行号
     bool at_bol;    // 此 token 是否在行首
 };
@@ -64,6 +71,7 @@ bool equal(Token *tok, char *op);
 Token *skip(Token *tok, char *op);
 bool consume(Token **rest, Token *tok, char *str);
 void convert_keywords(Token *tok);
+File **get_input_files(void);
 Token *tokenize_file(char *filename);
 
 #define unreachable() \

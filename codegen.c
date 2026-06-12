@@ -294,7 +294,7 @@ static void push_args(Node *args) {
 
 // 为给定节点生成代码
 static void gen_expr(Node *node) {
-    println("    .loc 1 %d", node->tok->line_no);
+    println("    .loc %d %d", node->tok->file->file_no, node->tok->line_no);
 
     switch (node->kind) {
     case ND_NULL_EXPR:
@@ -613,7 +613,7 @@ static void gen_expr(Node *node) {
 }
 
 static void gen_stmt(Node *node) {
-    println("    .loc 1 %d", node->tok->line_no);
+    println("    .loc %d %d", node->tok->file->file_no, node->tok->line_no);
 
     switch (node->kind) {
     case ND_IF: {
