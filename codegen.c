@@ -31,6 +31,16 @@ static void pop(char *arg) {
     depth--;
 }
 
+static void pushf(void) {
+    println("    str d0, [sp, #-16]!");
+    depth++;
+}
+
+static void popf(char *arg) {
+    println("    ldr %s, [sp], #16", arg);
+    depth--;
+}
+
 // 从 x0 指向的地址加载值。
 // 如果是数组类型则不加载，因为无法将整个数组加载到寄存器中。
 // 这也就是 C 语言中"数组会自动转换为指向首元素的指针"发生的地方。
@@ -433,6 +443,36 @@ static void gen_expr(Node *node) {
         }
         return;
     }
+    }
+
+    if (is_flonum(node->lhs->ty)) {
+        gen_expr(node->rhs);
+        pushf();
+        gen_expr(node->lhs);
+        popf("d1");
+
+        switch (node->kind) {
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+            if (node->lhs->ty->kind == TY_FLOAT)
+                println("    fcmp s1, s0");
+            else
+                println("    fcmp d1, d0");
+
+            if (node->kind == ND_EQ)
+                println("    cset x0, eq");
+            else if (node->kind == ND_NE)
+                println("    cset x0, ne");
+            else if (node->kind == ND_LT)
+                println("    cset x0, gt");
+            else
+                println("    cset x0, ge");
+            return;
+        }
+
+        error_tok(node->tok, "invalid expression");
     }
 
     gen_expr(node->rhs);
