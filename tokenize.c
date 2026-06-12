@@ -41,7 +41,7 @@ static void verror_at(char *filename, char *input, int line_no,
   fprintf(stderr, "%.*s\n", (int)(end - line), line);
 
   // Show the error message.
-  int pos = loc - line + indent;
+  int pos = display_width(line, loc - line) + indent;
 
   fprintf(stderr, "%*s", pos, ""); // print pos spaces.
   fprintf(stderr, "^ ");
@@ -103,6 +103,7 @@ static Token *new_token(TokenKind kind, char *start, char *end) {
   tok->loc = start;
   tok->len = end - start;
   tok->file = current_file;
+  tok->filename = current_file->display_name;
   tok->at_bol = at_bol;
   tok->has_space = has_space;
 
@@ -114,14 +115,21 @@ static bool startswith(char *p, char *q) {
   return strncmp(p, q, strlen(q)) == 0;
 }
 
-// Returns true if c is valid as the first character of an identifier.
-static bool is_ident1(char c) {
-  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
-}
+// Read an identifier and returns the length of it.
+// If p does not point to a valid identifier, 0 is returned.
+static int read_ident(char *start) {
+  char *p = start;
+  uint32_t c = decode_utf8(&p, p);
+  if (!is_ident1(c))
+    return 0;
 
-// Returns true if c is valid as a non-first character of an identifier.
-static bool is_ident2(char c) {
-  return is_ident1(c) || ('0' <= c && c <= '9');
+  for (;;) {
+    char *q;
+    c = decode_utf8(&q, p);
+    if (!is_ident2(c))
+      return p - start;
+    p = q;
+  }
 }
 
 static int from_hex(char c) {
@@ -155,6 +163,7 @@ static bool is_keyword(Token *tok) {
     "default", "extern", "_Alignof", "_Alignas", "do", "signed",
     "unsigned", "const", "volatile", "auto", "register", "restrict",
     "__restrict", "__restrict__", "_Noreturn", "float", "double",
+    "typeof", "asm", "_Thread_local", "__thread",
   };
 
   for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -228,12 +237,12 @@ static char *string_literal_end(char *p) {
   return p;
 }
 
-static Token *read_string_literal(char *start) {
-  char *end = string_literal_end(start + 1);
-  char *buf = calloc(1, end - start);
+static Token *read_string_literal(char *start, char *quote) {
+  char *end = string_literal_end(quote + 1);
+  char *buf = calloc(1, end - quote);
   int len = 0;
 
-  for (char *p = start + 1; p < end;) {
+  for (char *p = quote + 1; p < end;) {
     if (*p == '\\')
       buf[len++] = read_escaped_char(&p, p + 1);
     else
@@ -246,16 +255,74 @@ static Token *read_string_literal(char *start) {
   return tok;
 }
 
-static Token *read_char_literal(char *start, char *quote) {
+// Read a UTF-8-encoded string literal and transcode it in UTF-16.
+//
+// UTF-16 is yet another variable-width encoding for Unicode. Code
+// points smaller than U+10000 are encoded in 2 bytes. Code points
+// equal to or larger than that are encoded in 4 bytes. Each 2 bytes
+// in the 4 byte sequence is called "surrogate", and a 4 byte sequence
+// is called a "surrogate pair".
+static Token *read_utf16_string_literal(char *start, char *quote) {
+  char *end = string_literal_end(quote + 1);
+  uint16_t *buf = calloc(2, end - start);
+  int len = 0;
+
+  for (char *p = quote + 1; p < end;) {
+    if (*p == '\\') {
+      buf[len++] = read_escaped_char(&p, p + 1);
+      continue;
+    }
+
+    uint32_t c = decode_utf8(&p, p);
+    if (c < 0x10000) {
+      // Encode a code point in 2 bytes.
+      buf[len++] = c;
+    } else {
+      // Encode a code point in 4 bytes.
+      c -= 0x10000;
+      buf[len++] = 0xd800 + ((c >> 10) & 0x3ff);
+      buf[len++] = 0xdc00 + (c & 0x3ff);
+    }
+  }
+
+  Token *tok = new_token(TK_STR, start, end + 1);
+  tok->ty = array_of(ty_ushort, len + 1);
+  tok->str = (char *)buf;
+  return tok;
+}
+
+// Read a UTF-8-encoded string literal and transcode it in UTF-32.
+//
+// UTF-32 is a fixed-width encoding for Unicode. Each code point is
+// encoded in 4 bytes.
+static Token *read_utf32_string_literal(char *start, char *quote, Type *ty) {
+  char *end = string_literal_end(quote + 1);
+  uint32_t *buf = calloc(4, end - quote);
+  int len = 0;
+
+  for (char *p = quote + 1; p < end;) {
+    if (*p == '\\')
+      buf[len++] = read_escaped_char(&p, p + 1);
+    else
+      buf[len++] = decode_utf8(&p, p);
+  }
+
+  Token *tok = new_token(TK_STR, start, end + 1);
+  tok->ty = array_of(ty, len + 1);
+  tok->str = (char *)buf;
+  return tok;
+}
+
+static Token *read_char_literal(char *start, char *quote, Type *ty) {
   char *p = quote + 1;
   if (*p == '\0')
     error_at(start, "unclosed char literal");
 
-  char c;
+  int c;
   if (*p == '\\')
     c = read_escaped_char(&p, p + 1);
   else
-    c = *p++;
+    c = decode_utf8(&p, p);
 
   char *end = strchr(p, '\'');
   if (!end)
@@ -263,7 +330,7 @@ static Token *read_char_literal(char *start, char *quote) {
 
   Token *tok = new_token(TK_NUM, start, end + 1);
   tok->val = c;
-  tok->ty = ty_int;
+  tok->ty = ty;
   return tok;
 }
 
@@ -359,14 +426,14 @@ static void convert_pp_number(Token *tok) {
 
   // If it's not an integer, it must be a floating point constant.
   char *end;
-  double val = strtod(tok->loc, &end);
+  long double val = strtold(tok->loc, &end);
 
   Type *ty;
   if (*end == 'f' || *end == 'F') {
     ty = ty_float;
     end++;
   } else if (*end == 'l' || *end == 'L') {
-    ty = ty_double;
+    ty = ty_ldouble;
     end++;
   } else {
     ty = ty_double;
@@ -402,6 +469,16 @@ static void add_line_numbers(Token *tok) {
     if (*p == '\n')
       n++;
   } while (*p++);
+}
+
+Token *tokenize_string_literal(Token *tok, Type *basety) {
+  Token *t;
+  if (basety->size == 2)
+    t = read_utf16_string_literal(tok->loc, tok->loc);
+  else
+    t = read_utf32_string_literal(tok->loc, tok->loc, basety);
+  t->next = tok->next;
+  return t;
 }
 
 // Tokenize a given string and returns new tokens.
@@ -467,32 +544,74 @@ Token *tokenize(File *file) {
 
     // String literal
     if (*p == '"') {
-      cur = cur->next = read_string_literal(p);
+      cur = cur->next = read_string_literal(p, p);
+      p += cur->len;
+      continue;
+    }
+
+    // UTF-8 string literal
+    if (startswith(p, "u8\"")) {
+      cur = cur->next = read_string_literal(p, p + 2);
+      p += cur->len;
+      continue;
+    }
+
+    // UTF-16 string literal
+    if (startswith(p, "u\"")) {
+      cur = cur->next = read_utf16_string_literal(p, p + 1);
+      p += cur->len;
+      continue;
+    }
+
+    // Wide string literal
+    if (startswith(p, "L\"")) {
+      cur = cur->next = read_utf32_string_literal(p, p + 1, ty_int);
+      p += cur->len;
+      continue;
+    }
+
+    // UTF-32 string literal
+    if (startswith(p, "U\"")) {
+      cur = cur->next = read_utf32_string_literal(p, p + 1, ty_uint);
       p += cur->len;
       continue;
     }
 
     // Character literal
     if (*p == '\'') {
-      cur = cur->next = read_char_literal(p, p);
+      cur = cur->next = read_char_literal(p, p, ty_int);
+      cur->val = (char)cur->val;
+      p += cur->len;
+      continue;
+    }
+
+    // UTF-16 character literal
+    if (startswith(p, "u'")) {
+      cur = cur->next = read_char_literal(p, p + 1, ty_ushort);
+      cur->val &= 0xffff;
       p += cur->len;
       continue;
     }
 
     // Wide character literal
     if (startswith(p, "L'")) {
-      cur = cur->next = read_char_literal(p, p + 1);
-      p = cur->loc + cur->len;
+      cur = cur->next = read_char_literal(p, p + 1, ty_int);
+      p += cur->len;
+      continue;
+    }
+
+    // UTF-32 character literal
+    if (startswith(p, "U'")) {
+      cur = cur->next = read_char_literal(p, p + 1, ty_uint);
+      p += cur->len;
       continue;
     }
 
     // Identifier or keyword
-    if (is_ident1(*p)) {
-      char *start = p;
-      do {
-        p++;
-      } while (is_ident2(*p));
-      cur = cur->next = new_token(TK_IDENT, start, p);
+    int ident_len = read_ident(p);
+    if (ident_len) {
+      cur = cur->next = new_token(TK_IDENT, p, p + ident_len);
+      p += cur->len;
       continue;
     }
 
@@ -557,9 +676,29 @@ File **get_input_files(void) {
 File *new_file(char *name, int file_no, char *contents) {
   File *file = calloc(1, sizeof(File));
   file->name = name;
+  file->display_name = name;
   file->file_no = file_no;
   file->contents = contents;
   return file;
+}
+
+// Replaces \r or \r\n with \n.
+static void canonicalize_newline(char *p) {
+  int i = 0, j = 0;
+
+  while (p[i]) {
+    if (p[i] == '\r' && p[i + 1] == '\n') {
+      i += 2;
+      p[j++] = '\n';
+    } else if (p[i] == '\r') {
+      i++;
+      p[j++] = '\n';
+    } else {
+      p[j++] = p[i++];
+    }
+  }
+
+  p[j] = '\0';
 }
 
 // Removes backslashes followed by a newline.
@@ -589,12 +728,63 @@ static void remove_backslash_newline(char *p) {
   p[j] = '\0';
 }
 
+static uint32_t read_universal_char(char *p, int len) {
+  uint32_t c = 0;
+  for (int i = 0; i < len; i++) {
+    if (!isxdigit(p[i]))
+      return 0;
+    c = (c << 4) | from_hex(p[i]);
+  }
+  return c;
+}
+
+// Replace \u or \U escape sequences with corresponding UTF-8 bytes.
+static void convert_universal_chars(char *p) {
+  char *q = p;
+
+  while (*p) {
+    if (startswith(p, "\\u")) {
+      uint32_t c = read_universal_char(p + 2, 4);
+      if (c) {
+        p += 6;
+        q += encode_utf8(q, c);
+      } else {
+        *q++ = *p++;
+      }
+    } else if (startswith(p, "\\U")) {
+      uint32_t c = read_universal_char(p + 2, 8);
+      if (c) {
+        p += 10;
+        q += encode_utf8(q, c);
+      } else {
+        *q++ = *p++;
+      }
+    } else if (p[0] == '\\') {
+      *q++ = *p++;
+      *q++ = *p++;
+    } else {
+      *q++ = *p++;
+    }
+  }
+
+  *q = '\0';
+}
+
 Token *tokenize_file(char *path) {
   char *p = read_file(path);
   if (!p)
     return NULL;
 
+  // UTF-8 texts may start with a 3-byte "BOM" marker sequence.
+  // If exists, just skip them because they are useless bytes.
+  // (It is actually not recommended to add BOM markers to UTF-8
+  // texts, but it's not uncommon particularly on Windows.)
+  if (!memcmp(p, "\xef\xbb\xbf", 3))
+    p += 3;
+
+  canonicalize_newline(p);
   remove_backslash_newline(p);
+  convert_universal_chars(p);
 
   // Save the filename for assembler .file directive.
   static int file_no;

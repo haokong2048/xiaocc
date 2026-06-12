@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 
 StringArray include_paths;
+char *base_file;
 
 static char *opt_o;
 
@@ -66,6 +67,8 @@ int main(int argc, char **argv) {
 
     // 初始化预定义宏
     init_macros();
+
+    base_file = input_path;
 
     // 词法分析 + 语法分析
     Token *tok = tokenize_file(input_path);

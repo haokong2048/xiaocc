@@ -15,6 +15,7 @@ Type *ty_ulong = &(Type){TY_LONG, 8, 8, .is_unsigned = true};
 
 Type *ty_float = &(Type){TY_FLOAT, 4, 4};
 Type *ty_double = &(Type){TY_DOUBLE, 8, 8};
+Type *ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
 
 static Type *new_type(TypeKind kind, int size, int align) {
     Type *ty = calloc(1, sizeof(Type));
@@ -31,7 +32,7 @@ bool is_integer(Type *ty) {
 }
 
 bool is_flonum(Type *ty) {
-    return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE;
+    return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE;
 }
 
 bool is_numeric(Type *ty) {

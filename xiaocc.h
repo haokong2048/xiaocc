@@ -13,6 +13,9 @@
 #include <string.h>
 #include <strings.h>
 #include <libgen.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
 
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
@@ -52,7 +55,9 @@ typedef enum {
 
 typedef struct {
     char *name;
+    char *display_name;
     int file_no;
+    int line_delta;
     char *contents;
 } File;
 
@@ -69,11 +74,13 @@ struct Token {
     char *str;      // 字符串字面量内容（含结尾 '\0'）
 
     File *file;       // 源文件位置
+    char *filename;   // 文件名 (用于诊断)
     int line_no;      // 行号
     bool at_bol;      // 此 token 是否在行首
     bool has_space;   // 此 token 前是否有空白字符
     Hideset *hideset; // 用于宏展开
     Token *origin;    // 如果来自宏展开，指向原始 token
+    int line_delta;   // 行号增量（用于 #line 指令）
 };
 
 void error(char *fmt, ...);
@@ -87,6 +94,7 @@ void convert_pp_tokens(Token *tok);
 File **get_input_files(void);
 File *new_file(char *name, int file_no, char *contents);
 Token *tokenize(File *file);
+Token *tokenize_string_literal(Token *tok, Type *basety);
 Token *tokenize_file(char *filename);
 
 #define unreachable() \
@@ -256,6 +264,7 @@ typedef enum {
     TY_LONG,
     TY_FLOAT,
     TY_DOUBLE,
+    TY_LDOUBLE,
     TY_ENUM,
     TY_PTR,
     TY_FUNC,
@@ -324,6 +333,7 @@ extern Type *ty_ulong;
 
 extern Type *ty_float;
 extern Type *ty_double;
+extern Type *ty_ldouble;
 
 bool is_integer(Type *ty);
 bool is_flonum(Type *ty);
@@ -348,8 +358,14 @@ int align_to(int n, int align);
 //
 
 bool file_exists(char *path);
+uint32_t decode_utf8(char **new_pos, char *p);
+int encode_utf8(char *buf, uint32_t c);
+bool is_ident1(uint32_t c);
+bool is_ident2(uint32_t c);
+int display_width(char *p, int len);
 void strarray_push(StringArray *arr, char *s);
 
 extern StringArray include_paths;
+extern char *base_file;
 
 #endif
