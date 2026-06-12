@@ -156,15 +156,24 @@ struct Obj {
     bool is_static;
 
     // 全局变量
+    bool is_tentative;
+    bool is_tls;
     char *init_data;
     Relocation *rel;
 
     // 函数
+    bool is_inline;
     Obj *params;
     Node *body;
     Obj *locals;
     Obj *va_area;
+    Obj *alloca_bottom;
     int stack_size;
+
+    // 静态内联函数
+    bool is_live;
+    bool is_root;
+    StringArray refs;
 };
 
 // 全局变量可以通过常量表达式或指向其他全局变量的指针来初始化。
@@ -172,7 +181,7 @@ struct Obj {
 struct Relocation {
     Relocation *next;
     int offset;
-    char *label;
+    char **label;
     long addend;
 };
 
@@ -220,6 +229,10 @@ typedef enum {
     ND_NUM,       // 整数
     ND_CAST,      // 类型转换
     ND_MEMZERO,   // 将栈变量清零
+    ND_VLA_PTR,   // VLA 设计器
+    ND_LABEL_VAL, // [GNU] 标签作为值
+    ND_GOTO_EXPR, // "goto" 标签作为值
+    ND_ASM,       // "asm"
 } NodeKind;
 
 // AST 节点类型
@@ -269,6 +282,13 @@ struct Node {
     // 数字字面量
     int64_t val;
     double fval;
+
+    // "asm" 字符串字面量
+    char *asm_str;
+
+    // case 范围
+    long begin;
+    long end;
 };
 
 Node *new_cast(Node *expr, Type *ty);
@@ -293,6 +313,7 @@ typedef enum {
     TY_PTR,
     TY_FUNC,
     TY_ARRAY,
+    TY_VLA,     // 可变长度数组
     TY_STRUCT,
     TY_UNION,
 } TypeKind;
@@ -302,6 +323,7 @@ struct Type {
     int size;      // sizeof() 值
     int align;     // 对齐
     bool is_unsigned; // 无符号还是带符号
+    Type *origin;   // 用于类型兼容性检查
 
     // 指针或数组的基类型。我们有意使用同一个成员
     // 来表示 C 语言中的指针/数组二元性。
@@ -319,6 +341,10 @@ struct Type {
 
     // 数组
     int array_len;
+
+    // VLA
+    Node *vla_size;
+    Node *vla_len;
 
     // 结构体
     Member *members;
@@ -340,6 +366,9 @@ struct Member {
     int idx;
     int align;
     int offset;
+    bool is_bitfield;
+    int bit_width;
+    int bit_offset;
 };
 
 extern Type *ty_void;
