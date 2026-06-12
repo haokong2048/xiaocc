@@ -287,6 +287,19 @@ static void gen_expr(Node *node) {
             pop(argreg64[i]);
 
         println("    bl %s", node->funcname);
+
+        // 清除返回值寄存器的高位
+        switch (node->ty->kind) {
+        case TY_BOOL:
+            println("    and w0, w0, #0xff");
+            return;
+        case TY_CHAR:
+            println("    sxtb w0, w0");
+            return;
+        case TY_SHORT:
+            println("    sxth w0, w0");
+            return;
+        }
         return;
     }
     }
