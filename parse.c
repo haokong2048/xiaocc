@@ -1722,6 +1722,12 @@ static Node *cast(Token **rest, Token *tok) {
         Token *start = tok;
         Type *ty = typename(&tok, tok->next);
         tok = skip(tok, ")");
+
+        // 复合字面量
+        if (equal(tok, "{"))
+            return unary(rest, start);
+
+        // 类型转换
         Node *node = new_cast(cast(rest, tok), ty);
         node->tok = start;
         return node;
@@ -1911,8 +1917,27 @@ static Node *new_inc_dec(Node *node, Token *tok, int addend) {
                     node->ty);
 }
 
-// postfix = primary ("[" expr "]" | "." ident | "++" | "--")*
+// postfix = "(" type-name ")" "{" initializer-list "}"
+//         | primary ("[" expr "]" | "." ident | "++" | "--")*
 static Node *postfix(Token **rest, Token *tok) {
+    if (equal(tok, "(") && is_typename(tok->next)) {
+        // 复合字面量
+        Token *start = tok;
+        Type *ty = typename(&tok, tok->next);
+        tok = skip(tok, ")");
+
+        if (scope->next == NULL) {
+            Obj *var = new_anon_gvar(ty);
+            gvar_initializer(rest, tok, var);
+            return new_var_node(var, start);
+        }
+
+        Obj *var = new_lvar("", ty);
+        Node *lhs = lvar_initializer(rest, tok, var);
+        Node *rhs = new_var_node(var, tok);
+        return new_binary(ND_COMMA, lhs, rhs, start);
+    }
+
     Node *node = primary(&tok, tok);
 
     for (;;) {
