@@ -250,6 +250,7 @@ struct Type {
     // 函数类型
     Type *return_ty;
     Type *params;
+    bool is_variadic;
     Type *next;
 };
 
