@@ -739,6 +739,25 @@ static void emit_data(Obj *prog) {
     }
 }
 
+static void store_fp(int r, int offset, int sz) {
+    if (offset < -256 || offset > 255) {
+        compute_fp_offset(offset, "x8");
+        switch (sz) {
+        case 4: println("    str s%d, [x8]", r); return;
+        case 8: println("    str d%d, [x8]", r); return;
+        }
+    }
+    switch (sz) {
+    case 4:
+        println("    str s%d, [x29, #%d]", r, offset);
+        return;
+    case 8:
+        println("    str d%d, [x29, #%d]", r, offset);
+        return;
+    }
+    unreachable();
+}
+
 static void store_gp(int r, int offset, int sz) {
     if (offset < -256 || offset > 255) {
         compute_fp_offset(offset, "x8");
@@ -844,9 +863,13 @@ static void emit_text(Obj *prog) {
         }
 
         // 将寄存器传入的参数保存到栈中
-        int i = 0;
-        for (Obj *var = fn->params; var; var = var->next)
-            store_gp(i++, var->offset, var->ty->size);
+        int gp = 0, fp = 0;
+        for (Obj *var = fn->params; var; var = var->next) {
+            if (is_flonum(var->ty))
+                store_fp(fp++, var->offset, var->ty->size);
+            else
+                store_gp(gp++, var->offset, var->ty->size);
+        }
 
         gen_stmt(fn->body);
         assert(depth == 0);
