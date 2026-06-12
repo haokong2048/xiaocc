@@ -233,6 +233,11 @@ typedef enum {
     ND_LABEL_VAL, // [GNU] 标签作为值
     ND_GOTO_EXPR, // "goto" 标签作为值
     ND_ASM,       // "asm"
+    ND_CAS,           // 原子 compare-and-swap
+    ND_EXCH,          // 原子交换
+    ND_ATOMIC_LOAD,   // 原子加载
+    ND_ATOMIC_STORE,  // 原子存储
+    ND_ATOMIC_OP,     // 原子操作 (++, --, +=, etc.)
 } NodeKind;
 
 // AST 节点类型
@@ -286,6 +291,11 @@ struct Node {
     // "asm" 字符串字面量
     char *asm_str;
 
+    // 原子操作
+    Node *cas_addr;
+    Node *cas_old;
+    Node *cas_new;
+
     // case 范围
     long begin;
     long end;
@@ -323,7 +333,11 @@ struct Type {
     int size;      // sizeof() 值
     int align;     // 对齐
     bool is_unsigned; // 无符号还是带符号
+    bool is_atomic;   // 是否为 _Atomic 类型
     Type *origin;   // 用于类型兼容性检查
+
+    // 结构体
+    bool is_packed;   // __attribute__((packed))
 
     // 指针或数组的基类型。我们有意使用同一个成员
     // 来表示 C 语言中的指针/数组二元性。

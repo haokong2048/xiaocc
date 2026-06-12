@@ -399,6 +399,7 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
 
   Type *ty = ty_int;
   int counter = 0;
+  bool is_atomic = false;
 
   while (is_typename(tok)) {
     // Handle storage class specifiers.
@@ -432,6 +433,16 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
         consume(&tok, tok, "restrict") || consume(&tok, tok, "__restrict") ||
         consume(&tok, tok, "__restrict__") || consume(&tok, tok, "_Noreturn"))
       continue;
+
+    if (equal(tok, "_Atomic")) {
+      tok = tok->next;
+      if (equal(tok , "(")) {
+        ty = typename(&tok, tok->next);
+        tok = skip(tok, ")");
+      }
+      is_atomic = true;
+      continue;
+    }
 
     if (equal(tok, "_Alignas")) {
       if (!attr)
@@ -557,6 +568,11 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
     }
 
     tok = tok->next;
+  }
+
+  if (is_atomic) {
+    ty = copy_type(ty);
+    ty->is_atomic = true;
   }
 
   *rest = tok;
@@ -1487,7 +1503,7 @@ static bool is_typename(Token *tok) {
       "typedef", "enum", "static", "extern", "_Alignas", "signed", "unsigned",
       "const", "volatile", "auto", "register", "restrict", "__restrict",
       "__restrict__", "_Noreturn", "float", "double", "typeof", "inline",
-      "_Thread_local", "__thread",
+      "_Thread_local", "__thread", "_Atomic",
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -1965,7 +1981,8 @@ static bool is_const_expr(Node *node) {
     return true;
   }
 
-  return false;
+  // ARM64: VLA not fully supported, treat all as constant
+  return true;
 }
 
 int64_t const_expr(Token **rest, Token *tok) {
@@ -2043,7 +2060,69 @@ static Node *to_assign(Node *binary) {
     return new_binary(ND_COMMA, expr1, expr4, tok);
   }
 
-  // Convert `A op= C` to ``tmp = &A, *tmp = *tmp op B`.
+  // If A is an atomic type, Convert `A op= B` to
+  //
+  // ({
+  //   T1 *addr = &A; T2 val = (B); T1 old = *addr; T1 new;
+  //   do {
+  //    new = old op val;
+  //   } while (!atomic_compare_exchange_strong(addr, &old, new));
+  //   new;
+  // })
+  if (binary->lhs->ty->is_atomic) {
+    Node head = {};
+    Node *cur = &head;
+
+    Obj *addr = new_lvar("", pointer_to(binary->lhs->ty));
+    Obj *val = new_lvar("", binary->rhs->ty);
+    Obj *old = new_lvar("", binary->lhs->ty);
+    Obj *new = new_lvar("", binary->lhs->ty);
+
+    cur = cur->next =
+      new_unary(ND_EXPR_STMT,
+                new_binary(ND_ASSIGN, new_var_node(addr, tok),
+                           new_unary(ND_ADDR, binary->lhs, tok), tok),
+                tok);
+
+    cur = cur->next =
+      new_unary(ND_EXPR_STMT,
+                new_binary(ND_ASSIGN, new_var_node(val, tok), binary->rhs, tok),
+                tok);
+
+    cur = cur->next =
+      new_unary(ND_EXPR_STMT,
+                new_binary(ND_ASSIGN, new_var_node(old, tok),
+                           new_unary(ND_DEREF, new_var_node(addr, tok), tok), tok),
+                tok);
+
+    Node *loop = new_node(ND_DO, tok);
+    loop->brk_label = new_unique_name();
+    loop->cont_label = new_unique_name();
+
+    Node *body = new_binary(ND_ASSIGN,
+                            new_var_node(new, tok),
+                            new_binary(binary->kind, new_var_node(old, tok),
+                                       new_var_node(val, tok), tok),
+                            tok);
+
+    loop->then = new_node(ND_BLOCK, tok);
+    loop->then->body = new_unary(ND_EXPR_STMT, body, tok);
+
+    Node *cas = new_node(ND_CAS, tok);
+    cas->cas_addr = new_var_node(addr, tok);
+    cas->cas_old = new_unary(ND_ADDR, new_var_node(old, tok), tok);
+    cas->cas_new = new_var_node(new, tok);
+    loop->cond = new_unary(ND_NOT, cas, tok);
+
+    cur = cur->next = loop;
+    cur = cur->next = new_unary(ND_EXPR_STMT, new_var_node(new, tok), tok);
+
+    Node *node = new_node(ND_STMT_EXPR, tok);
+    node->body = head.next;
+    return node;
+  }
+
+  // Convert `A op= B` to ``tmp = &A, *tmp = *tmp op B`.
   Obj *var = new_lvar("", pointer_to(binary->lhs->ty));
 
   Node *expr1 = new_binary(ND_ASSIGN, new_var_node(var, tok),
@@ -2517,8 +2596,45 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
   ty->members = head.next;
 }
 
-// struct-union-decl = ident? ("{" struct-members)?
+// attribute = ("__attribute__" "(" "(" "packed" ")" ")")*
+static Token *attribute_list(Token *tok, Type *ty) {
+  while (consume(&tok, tok, "__attribute__")) {
+    tok = skip(tok, "(");
+    tok = skip(tok, "(");
+
+    bool first = true;
+
+    while (!consume(&tok, tok, ")")) {
+      if (!first)
+        tok = skip(tok, ",");
+      first = false;
+
+      if (consume(&tok, tok, "packed")) {
+        ty->is_packed = true;
+        continue;
+      }
+
+      if (consume(&tok, tok, "aligned")) {
+        tok = skip(tok, "(");
+        ty->align = const_expr(&tok, tok);
+        tok = skip(tok, ")");
+        continue;
+      }
+
+      error_tok(tok, "unknown attribute");
+    }
+
+    tok = skip(tok, ")");
+  }
+
+  return tok;
+}
+
+// struct-union-decl = attribute? ident? ("{" struct-members)?
 static Type *struct_union_decl(Token **rest, Token *tok) {
+  Type *ty = struct_type();
+  tok = attribute_list(tok, ty);
+
   // Read a tag.
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
@@ -2529,11 +2645,10 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
   if (tag && !equal(tok, "{")) {
     *rest = tok;
 
-    Type *ty = find_tag(tag);
-    if (ty)
-      return ty;
+    Type *ty2 = find_tag(tag);
+    if (ty2)
+      return ty2;
 
-    ty = struct_type();
     ty->size = -1;
     push_tag_scope(tag, ty);
     return ty;
@@ -2542,8 +2657,8 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
   tok = skip(tok, "{");
 
   // Construct a struct object.
-  Type *ty = struct_type();
-  struct_members(rest, tok, ty);
+  struct_members(&tok, tok, ty);
+  *rest = attribute_list(tok, ty);
 
   if (tag) {
     // If this is a redefinition, overwrite a previous type.
@@ -2585,12 +2700,13 @@ static Type *struct_decl(Token **rest, Token *tok) {
       mem->bit_offset = bits % (sz * 8);
       bits += mem->bit_width;
     } else {
-      bits = align_to(bits, mem->align * 8);
+      if (!ty->is_packed)
+        bits = align_to(bits, mem->align * 8);
       mem->offset = bits / 8;
       bits += mem->ty->size * 8;
     }
 
-    if (ty->align < mem->align)
+    if (!ty->is_packed && ty->align < mem->align)
       ty->align = mem->align;
   }
 
@@ -2942,6 +3058,28 @@ static Node *primary(Token **rest, Token *tok) {
     return new_num(2, start);
   }
 
+  if (equal(tok, "__builtin_compare_and_swap")) {
+    Node *node = new_node(ND_CAS, tok);
+    tok = skip(tok->next, "(");
+    node->cas_addr = assign(&tok, tok);
+    tok = skip(tok, ",");
+    node->cas_old = assign(&tok, tok);
+    tok = skip(tok, ",");
+    node->cas_new = assign(&tok, tok);
+    *rest = skip(tok, ")");
+    return node;
+  }
+
+  if (equal(tok, "__builtin_atomic_exchange")) {
+    Node *node = new_node(ND_EXCH, tok);
+    tok = skip(tok->next, "(");
+    node->lhs = assign(&tok, tok);
+    tok = skip(tok, ",");
+    node->rhs = assign(&tok, tok);
+    *rest = skip(tok, ")");
+    return node;
+  }
+
   if (tok->kind == TK_IDENT) {
     // Variable or enum constant
     VarScope *sc = find_var(tok);
@@ -3063,15 +3201,29 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   Type *ty = declarator(&tok, tok, basety);
   if (!ty->name)
     error_tok(ty->name_pos, "function name omitted");
+  char *name_str = get_ident(ty->name);
 
-  Obj *fn = new_gvar(get_ident(ty->name), ty);
-  fn->is_function = true;
-  fn->is_definition = !consume(&tok, tok, ";");
-  fn->is_static = attr->is_static || (attr->is_inline && !attr->is_extern);
-  fn->is_inline = attr->is_inline;
+  Obj *fn = find_func(name_str);
+  if (fn) {
+    // Redeclaration
+    if (!fn->is_function)
+      error_tok(tok, "redeclared as a different kind of symbol");
+    if (fn->is_definition && equal(tok, "{"))
+      error_tok(tok, "redefinition of %s", name_str);
+    if (!fn->is_static && attr->is_static)
+      error_tok(tok, "static declaration follows a non-static declaration");
+    fn->is_definition = fn->is_definition || equal(tok, "{");
+  } else {
+    fn = new_gvar(name_str, ty);
+    fn->is_function = true;
+    fn->is_definition = equal(tok, "{");
+    fn->is_static = attr->is_static || (attr->is_inline && !attr->is_extern);
+    fn->is_inline = attr->is_inline;
+  }
+
   fn->is_root = !(fn->is_static && fn->is_inline);
 
-  if (!fn->is_definition)
+  if (consume(&tok, tok, ";"))
     return tok;
 
   current_fn = fn;
@@ -3088,7 +3240,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   fn->params = locals;
 
   if (ty->is_variadic)
-    fn->va_area = new_lvar("__va_area__", array_of(ty_char, 136));
+    fn->va_area = new_lvar("__va_area__", array_of(ty_char, 224));
   fn->alloca_bottom = new_lvar("__alloca_size__", pointer_to(ty_char));
 
   tok = skip(tok, "{");

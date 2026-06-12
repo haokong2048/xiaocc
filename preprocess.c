@@ -67,6 +67,8 @@ struct Hideset {
 
 static HashMap macros;
 static CondIncl *cond_incl;
+static HashMap pragma_once;
+static int include_next_idx;
 
 static Token *preprocess2(Token *tok);
 static Macro *find_macro(Token *tok);
@@ -684,9 +686,26 @@ char *search_include_paths(char *filename) {
   if (filename[0] == '/')
     return filename;
 
+  static HashMap cache;
+  char *cached = hashmap_get(&cache, filename);
+  if (cached)
+    return cached;
+
   // Search a file from the include paths.
   for (int i = 0; i < include_paths.len; i++) {
     char *path = format("%s/%s", include_paths.data[i], filename);
+    if (!file_exists(path))
+      continue;
+    hashmap_put(&cache, filename, path);
+    include_next_idx = i + 1;
+    return path;
+  }
+  return NULL;
+}
+
+static char *search_include_next(char *filename) {
+  for (; include_next_idx < include_paths.len; include_next_idx++) {
+    char *path = format("%s/%s", include_paths.data[include_next_idx], filename);
     if (file_exists(path))
       return path;
   }
@@ -734,10 +753,66 @@ static char *read_include_filename(Token **rest, Token *tok, bool *is_dquote) {
   error_tok(tok, "expected a filename");
 }
 
+// Detect the following "include guard" pattern.
+//
+//   #ifndef FOO_H
+//   #define FOO_H
+//   ...
+//   #endif
+static char *detect_include_guard(Token *tok) {
+  // Detect the first two lines.
+  if (!is_hash(tok) || !equal(tok->next, "ifndef"))
+    return NULL;
+  tok = tok->next->next;
+
+  if (tok->kind != TK_IDENT)
+    return NULL;
+
+  char *macro = strndup(tok->loc, tok->len);
+  tok = tok->next;
+
+  if (!is_hash(tok) || !equal(tok->next, "define") || !equal(tok->next->next, macro))
+    return NULL;
+
+  // Read until the end of the file.
+  while (tok->kind != TK_EOF) {
+    if (!is_hash(tok)) {
+      tok = tok->next;
+      continue;
+    }
+
+    if (equal(tok->next, "endif") && tok->next->next->kind == TK_EOF)
+      return macro;
+
+    if (equal(tok, "if") || equal(tok, "ifdef") || equal(tok, "ifndef"))
+      tok = skip_cond_incl(tok->next);
+    else
+      tok = tok->next;
+  }
+  return NULL;
+}
+
 static Token *include_file(Token *tok, char *path, Token *filename_tok) {
+  // Check for "#pragma once"
+  if (hashmap_get(&pragma_once, path))
+    return tok;
+
+  // If we read the same file before, and if the file was guarded
+  // by the usual #ifndef ... #endif pattern, we may be able to
+  // skip the file without opening it.
+  static HashMap include_guards;
+  char *guard_name = hashmap_get(&include_guards, path);
+  if (guard_name && hashmap_get(&macros, guard_name))
+    return tok;
+
   Token *tok2 = tokenize_file(path);
   if (!tok2)
     error_tok(filename_tok, "%s: cannot open file: %s", path, strerror(errno));
+
+  guard_name = detect_include_guard(tok2);
+  if (guard_name)
+    hashmap_put(&include_guards, path, guard_name);
+
   return append(tok2, tok);
 }
 
@@ -795,6 +870,14 @@ static Token *preprocess2(Token *tok) {
       }
 
       char *path = search_include_paths(filename);
+      tok = include_file(tok, path ? path : filename, start->next->next);
+      continue;
+    }
+
+    if (equal(tok, "include_next")) {
+      bool ignore;
+      char *filename = read_include_filename(&tok, tok->next, &ignore);
+      char *path = search_include_next(filename);
       tok = include_file(tok, path ? path : filename, start->next->next);
       continue;
     }
@@ -877,6 +960,12 @@ static Token *preprocess2(Token *tok) {
 
     if (tok->kind == TK_PP_NUM) {
       read_line_marker(&tok, tok);
+      continue;
+    }
+
+    if (equal(tok, "pragma") && equal(tok->next, "once")) {
+      hashmap_put(&pragma_once, tok->file->name, (void *)1);
+      tok = skip_line(tok->next->next);
       continue;
     }
 
@@ -986,7 +1075,6 @@ void init_macros(void) {
   define_macro("__SIZEOF_SIZE_T__", "8");
   define_macro("__SIZE_TYPE__", "unsigned long");
   define_macro("__STDC_HOSTED__", "1");
-  define_macro("__STDC_NO_ATOMICS__", "1");
   define_macro("__STDC_NO_COMPLEX__", "1");
   define_macro("__STDC_UTF_16__", "1");
   define_macro("__STDC_UTF_32__", "1");
@@ -994,8 +1082,8 @@ void init_macros(void) {
   define_macro("__STDC__", "1");
   define_macro("__USER_LABEL_PREFIX__", "");
   define_macro("__alignof__", "_Alignof");
-  define_macro("__amd64", "1");
-  define_macro("__amd64__", "1");
+  define_macro("__aarch64__", "1");
+  define_macro("__ARM_ARCH", "8");
   define_macro("__chibicc__", "1");
   define_macro("__const__", "const");
   define_macro("__gnu_linux__", "1");
@@ -1007,8 +1095,7 @@ void init_macros(void) {
   define_macro("__unix", "1");
   define_macro("__unix__", "1");
   define_macro("__volatile__", "volatile");
-  define_macro("__x86_64", "1");
-  define_macro("__x86_64__", "1");
+  define_macro("__ARM_ARCH_8A", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");
 

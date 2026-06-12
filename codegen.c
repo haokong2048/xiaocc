@@ -662,7 +662,7 @@ static void gen_stmt(Node *node) {
         gen_expr(node->cond);
 
         for (Node *n = node->case_next; n; n = n->case_next) {
-            println("    cmp x0, #%ld", n->val);
+            println("    cmp x0, #%ld", n->begin);
             println("    b.eq %s", n->label);
         }
 

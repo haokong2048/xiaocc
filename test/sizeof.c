@@ -87,7 +87,8 @@ int main() {
     ASSERT(4, sizeof(float));
     ASSERT(8, sizeof(double));
 
-    ASSERT(8, sizeof(long double));
+    // ARM64: long double = 16 bytes (128-bit)
+    ASSERT(16, sizeof(long double));
 
     printf("OK\n");
     return 0;
