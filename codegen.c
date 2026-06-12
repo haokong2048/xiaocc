@@ -85,6 +85,26 @@ int align_to(int n, int align) {
     return (n + align - 1) / align * align;
 }
 
+// 计算 x29 + offset 并将结果存入目标寄存器
+// 处理大偏移量（> 4095）
+static void compute_fp_offset(int offset, char *dst) {
+    if (offset >= 0 && offset <= 4095) {
+        println("    add %s, x29, #%d", dst, offset);
+    } else if (offset < 0 && -offset <= 4095) {
+        println("    sub %s, x29, #%d", dst, -offset);
+    } else {
+        // 使用 mov/movk 加载偏移量
+        int abs_off = (offset < 0) ? -offset : offset;
+        println("    movz %s, #%d", dst, abs_off & 0xFFFF);
+        if (abs_off & 0xFFFF0000)
+            println("    movk %s, #%d, lsl #16", dst, (abs_off >> 16) & 0xFFFF);
+        if (offset < 0)
+            println("    sub %s, x29, %s", dst, dst);
+        else
+            println("    add %s, x29, %s", dst, dst);
+    }
+}
+
 // 计算给定节点的绝对地址
 // 如果节点不在内存中则报错
 static void gen_addr(Node *node) {
@@ -92,7 +112,7 @@ static void gen_addr(Node *node) {
     case ND_VAR:
         if (node->var->is_local) {
             // 局部变量
-            println("    sub x0, x29, #%d", -node->var->offset);
+            compute_fp_offset(node->var->offset, "x0");
         } else {
             // 全局变量
             println("    adrp x0, %s", node->var->name);
@@ -290,7 +310,7 @@ static void gen_expr(Node *node) {
     case ND_MEMZERO: {
         int c = count();
         println("    mov w1, #%d", node->var->ty->size);
-        println("    add x0, x29, #%d", node->var->offset);
+        compute_fp_offset(node->var->offset, "x0");
         println(".L.memzero.%d:", c);
         println("    strb wzr, [x0], #1");
         println("    sub w1, w1, #1");
@@ -554,7 +574,7 @@ static void emit_data(Obj *prog) {
 
 static void store_gp(int r, int offset, int sz) {
     if (offset < -256 || offset > 255) {
-        println("    add x8, x29, #%d", offset);
+        compute_fp_offset(offset, "x8");
         switch (sz) {
         case 1: println("    strb w%d, [x8]", r); return;
         case 2: println("    strh w%d, [x8]", r); return;
@@ -596,7 +616,14 @@ static void emit_text(Obj *prog) {
         // 函数序言
         println("    stp x29, x30, [sp, #-16]!");
         println("    mov x29, sp");
-        println("    sub sp, sp, #%d", fn->stack_size);
+        if (fn->stack_size <= 4095)
+            println("    sub sp, sp, #%d", fn->stack_size);
+        else {
+            println("    movz x8, #%d", fn->stack_size & 0xFFFF);
+            if (fn->stack_size & 0xFFFF0000)
+                println("    movk x8, #%d, lsl #16", (fn->stack_size >> 16) & 0xFFFF);
+            println("    sub sp, sp, x8");
+        }
 
         // 为可变参数函数保存寄存器 (ARM64 AAPCS64 布局)
         if (fn->va_area) {
@@ -606,7 +633,7 @@ static void emit_text(Obj *prog) {
             int off = fn->va_area->offset;
 
             // 使用 x8 作为基地址
-            println("    add x8, x29, #%d", off);
+            compute_fp_offset(off, "x8");
 
             // ARM64 va_area 布局:
             //   +0:   va_elem (32 bytes)
@@ -660,7 +687,14 @@ static void emit_text(Obj *prog) {
         println(".L.return.%s:", fn->name);
 
         // 函数尾声
-        println("    add sp, sp, #%d", fn->stack_size);
+        if (fn->stack_size <= 4095)
+            println("    add sp, sp, #%d", fn->stack_size);
+        else {
+            println("    movz x8, #%d", fn->stack_size & 0xFFFF);
+            if (fn->stack_size & 0xFFFF0000)
+                println("    movk x8, #%d, lsl #16", (fn->stack_size >> 16) & 0xFFFF);
+            println("    add sp, sp, x8");
+        }
         println("    ldp x29, x30, [sp], #16");
         println("    ret");
     }
