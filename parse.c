@@ -664,6 +664,15 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
         if (ty->kind == TY_VOID)
             error_tok(tok, "variable declared void");
 
+        if (attr && attr->is_static) {
+            // 静态局部变量
+            Obj *var = new_anon_gvar(ty);
+            push_scope(get_ident(ty->name))->var = var;
+            if (equal(tok, "="))
+                gvar_initializer(&tok, tok->next, var);
+            continue;
+        }
+
         Obj *var = new_lvar(get_ident(ty->name), ty);
         if (attr && attr->align)
             var->align = attr->align;
