@@ -2263,6 +2263,18 @@ static Node *primary(Token **rest, Token *tok) {
         return new_ulong(node->ty->align, tok);
     }
 
+    if (equal(tok, "__builtin_reg_class")) {
+        tok = skip(tok->next, "(");
+        Type *ty = typename(&tok, tok);
+        *rest = skip(tok, ")");
+
+        if (is_integer(ty) || ty->kind == TY_PTR)
+            return new_num(0, start);
+        if (is_flonum(ty))
+            return new_num(1, start);
+        return new_num(2, start);
+    }
+
     if (tok->kind == TK_IDENT) {
         // 变量或枚举常量
         VarScope *sc = find_var(tok);

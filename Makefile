@@ -19,6 +19,14 @@ test/macro.exe: xiaocc test/macro.c
 	$(QEMU) ./xiaocc -o test/macro.s test/macro.c
 	$(CC) -static -o $@ test/macro.s -xc test/common
 
+test/stdhdr.exe: xiaocc test/stdhdr.c
+	$(QEMU) ./xiaocc -o test/stdhdr.s test/stdhdr.c
+	$(CC) -static -o $@ test/stdhdr.s -xc test/common
+
+test/varargs.exe: xiaocc test/varargs.c
+	$(QEMU) ./xiaocc -o test/varargs.s test/varargs.c
+	$(CC) -static -o $@ test/varargs.s -xc test/common
+
 test/%.exe: xiaocc test/%.c
 	$(CC) -o- -E -P -C test/$*.c | $(QEMU) ./xiaocc -o test/$*.s -
 	$(CC) -static -o $@ test/$*.s -xc test/common

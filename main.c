@@ -59,6 +59,7 @@ int main(int argc, char **argv) {
 
     // 添加默认 include 路径 (ARM64)
     strarray_push(&include_paths, ".");
+    strarray_push(&include_paths, "include");
     strarray_push(&include_paths, "/usr/local/include");
     strarray_push(&include_paths, "/usr/aarch64-linux-gnu/include");
     strarray_push(&include_paths, "/usr/include");
