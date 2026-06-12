@@ -36,8 +36,8 @@ static void pushf(void) {
     depth++;
 }
 
-static void popf(char *arg) {
-    println("    ldr %s, [sp], #16", arg);
+static void popf(int reg) {
+    println("    ldr d%d, [sp], #16", reg);
     depth--;
 }
 
@@ -269,6 +269,18 @@ static void cast(Type *from, Type *to) {
         println("    %s", cast_table[t1][t2]);
 }
 
+static void push_args(Node *args) {
+    if (args) {
+        push_args(args->next);
+
+        gen_expr(args);
+        if (is_flonum(args->ty))
+            pushf();
+        else
+            push();
+    }
+}
+
 // 为给定节点生成代码
 static void gen_expr(Node *node) {
     println("    .loc 1 %d", node->tok->line_no);
@@ -419,15 +431,15 @@ static void gen_expr(Node *node) {
         return;
     }
     case ND_FUNCALL: {
-        int nargs = 0;
-        for (Node *arg = node->args; arg; arg = arg->next) {
-            gen_expr(arg);
-            push();
-            nargs++;
-        }
+        push_args(node->args);
 
-        for (int i = nargs - 1; i >= 0; i--)
-            pop(argreg64[i]);
+        int gp = 0, fp = 0;
+        for (Node *arg = node->args; arg; arg = arg->next) {
+            if (is_flonum(arg->ty))
+                popf(fp++);
+            else
+                pop(argreg64[gp++]);
+        }
 
         println("    bl %s", node->funcname);
 
@@ -457,7 +469,7 @@ static void gen_expr(Node *node) {
         gen_expr(node->rhs);
         pushf();
         gen_expr(node->lhs);
-        popf("d1");
+        popf(1);
 
         switch (node->kind) {
         case ND_ADD:
